@@ -16,7 +16,6 @@
     <img src="./resources/logo.webp" alt="FlexNGIA Logo" width="250">
 </div>
 
----
 
 ## 📖 Overview
 
