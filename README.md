@@ -1,6 +1,6 @@
 <div align="center">
 
-# FlexNGIA 2.0: Redesigning the Internet with Agentic AI <br> Protocols, Services, and Traffic Engineering Designed, Deployed, and Managed by AI
+## FlexNGIA 2.0: Redesigning the Internet with Agentic AI <br> Protocols, Services, and Traffic Engineering Designed, Deployed, and Managed by AI
 
 **Mohamed Faten Zhani**<sup>1,2</sup>, **Younes Korbi**<sup>1,2</sup> and **Yamen Mkadem**<sup>1,2</sup>  
 <sup>1</sup>FlexNGIA, Tunisia 
