@@ -1,13 +1,6 @@
-<style>
-  h1, h2 {
-    border-bottom: none !important;
-  }
-</style>
-
 <div align="center">
 
-<h1>FlexNGIA 2.0: Redesigning the Internet with Agentic AI</h1> 
-<h2>Protocols, Services, and Traffic Engineering Designed, Deployed, and Managed by AI</h2> 
+# FlexNGIA 2.0: Redesigning the Internet with Agentic AI <br> Protocols, Services, and Traffic Engineering Designed, Deployed, and Managed by AI
 
 **Mohamed Faten Zhani**<sup>1,2</sup>, **Younes Korbi**<sup>1,2</sup> and **Yamen Mkadem**<sup>1,2</sup>  
 <sup>1</sup>FlexNGIA, Tunisia 
@@ -20,7 +13,7 @@
 </div>
 
 <div align="center">
-    <img src="./resources/logo.webp" alt="FlexNGIA Logo" width="300">
+    <img src="./resources/logo.webp" alt="FlexNGIA Logo" width="250">
 </div>
 
 ---
@@ -31,10 +24,10 @@ This repository contains the official implementation and experimental code for t
 **"FlexNGIA 2.0: Redesigning the Internet with Agentic AI Protocols, Services, and Traffic Engineering Designed, Deployed, and Managed by AI"**
 
 The project demonstrates an Agentic AI-driven Internet architecture where LLM-based AI agents autonomously design, implement, and manage:
-- **Custom Congestion Control schemes** 🚦
-- **Service Function Chains (SFCs)** ⛓️  
-- **Network protocols** 📡
-- **Resource allocation strategies** 📊
+- **Custom Congestion Control schemes**
+- **Service Function Chains (SFCs)**
+- **Network protocols**
+- **Resource allocation strategies**
 
 This repository serves as both the codebase and comprehensive documentation for reproducing all experiments and results presented in the paper.
 
