@@ -1,6 +1,6 @@
 <div align="center">
 
-## FlexNGIA 2.0: Redesigning the Internet with Agentic AI <br> Protocols, Services, and Traffic Engineering Designed, Deployed, and Managed by AI
+## FlexNGIA 2.0: Redesigning the Internet with Agentic AI <br> Protocols, Services, and Traffic Engineering Designed, Deployed, <span style="white-space: nowrap;">and Managed</span> by AI
 
 **Mohamed Faten Zhani**<sup>1,2</sup>, **Younes Korbi**<sup>1,2</sup> and **Yamen Mkadem**<sup>1,2</sup>  
 <sup>1</sup>FlexNGIA, Tunisia 
@@ -45,192 +45,45 @@ This repository serves as both the codebase and comprehensive documentation for 
 
 ## 1. Congestion Control Agent
 
-This section includes the implementation and experiments for the AI-Driven Congestion Control Agent, including the required kernel-side implementations for custom TCP functionality.
+This section covers the design, implementation, and experiments for the **AI-Driven Congestion Control Agent**.  
+It combines kernel-side extensions with LLM-based decision logic to dynamically design, select, and deploy congestion control (CC) schemes.
 
-### 1.1 Kernel Installation and Configuration
+### 1.1 Kernel Support
 
-This subsection focuses on kernel-side implementations including kernel source installation, configuration, building, and module insertion. The final custom kernel will include TCP metrics monitoring and a TCP proxy module for seamless Congestion Control scheme switching.
+To enable AI-driven CC, the Linux kernel is extended with:
 
-#### Prerequisites
+- **Custom TCP Proxy CC Module**  
+  A minimal congestion control algorithm (`proxy`) that delegates its logic to another CC algorithm at runtime. This enables seamless switching between algorithms without rebooting or recompilation.
 
-Install required development tools:
-```bash
-sudo apt-get install build-essential libncurses-dev bison flex libssl-dev libelf-dev
-```
+- **TCP Metrics Monitoring**  
+  Extended instrumentation inside the TCP stack to extract key transport-layer metrics in real time:
+  - Congestion Window (CWND)  
+  - Round-Trip Time (RTT)  
+  - Losses and retransmissions  
+  - Sending rate and throughput  
 
-Install `dwarves` package (required for modern kernel builds):
-```bash
-sudo apt install dwarves
-```
-
-#### Kernel Source Installation
-
-This customized Linux kernel version 5.13.12 (based on Google's BBR kernel) includes additional capabilities:
-
-- **TCP Metric Monitoring**: A module integrated into TCP Congestion Control modules that extracts real-time TCP metrics transparently, including:
-  - Congestion Window (CWND)
-  - Round-Trip Time (RTT)
-  - TCP rate
-  - Losses and retransmissions
-  - Extensible to capture additional TCP-related metrics
-
-- **TCP Proxy**: A minimal TCP congestion control proxy that:
-  - Delegates all congestion behavior to another CC algorithm chosen at runtime
-  - Implements no control logic—forwards kernel's CC callbacks to selected delegate
-  - Enables rapid switching between congestion control algorithms at runtime
-  - **Name**: `proxy` (as a TCP CC algorithm)
-  - **Default Delegate**: `reno` (modifiable at runtime)
-  - **Forwarded Callbacks**: `ssthresh()`, `cong_avoid()`, `undo_cwnd()`
-  - **Runtime Control**: `/sys/module/tcp_proxy/parameters/delegate_cc`
-
-#### How TCP Proxy Works
-
-- **Delegation Model:**  
-  The module exposes a parameter, `delegate_cc`, which holds the name of the target CC algorithm (e.g., `reno`, `llm_cc_v0`). On load or when the parameter changes, the proxy resolves the delegate using `tcp_ca_find()`, pins its module with `try_module_get()`, and forwards CC callbacks to the delegate.
-
-- **Forwarded Callbacks:**  
-  - `ssthresh()` → Delegate's slow-start threshold function  
-  - `cong_avoid()` → Delegate's congestion avoidance function  
-  - `undo_cwnd()` → Delegate's cwnd undo function
-
-- **Module Parameter:**  
-  - **Name:** `delegate_cc`  
-  - **Path:** `/sys/module/tcp_proxy/parameters/delegate_cc`  
-  - **Read/Write:** Yes (requires root privileges)  
-  - **Default Value:** `reno`
-
-- **Lifecycle:**  
-  On load, the `proxy` registers as a CC algorithm, resolves the default delegate, and pins it. On unload, it releases the delegate's module reference and unregisters itself.
-
-#### TCP Proxy Compatibility and Limitations
-
-- **Delegate Requirements:**  
-  The delegate must implement the following callbacks:
-  - `ssthresh()`
-  - `cong_avoid()`
-  - `undo_cwnd()`
-
-- **Compatible With:**  
-  Traditional loss-based CC algorithms such as `reno`
-
-- **Not Suitable For:**  
-  Algorithms like **BBR**, which use `cong_control()` instead of `cong_avoid()`
-
-> 💡 Set the congestion control `proxy` as the system-wide CC algorithm and switch the delegate dynamically to compare CC algorithms. The `tcp_proxy` module is perceived by the kernel as a standard congestion control module.
-
-#### Download and Setup
-
-Download the kernel source: 
-```bash
-wget https://tinyurl.com/zsmvdabt
-unzip kernel_5.13.12.zip
-cd kernel_5.13.12
-```
-
-#### First-Time Compilation Setup
-
-Execute the following commands in the terminal:
-```bash
-CONFIG_SYSTEM_TRUSTED_KEYS=""
-scripts/config --set-str SYSTEM_TRUSTED_KEYS ""
-scripts/config --disable SYSTEM_REVOCATION_KEYS
-```
-
-#### Kernel Configuration
-
-Copy your current kernel configuration:
-```bash
-cp -v /boot/config-$(uname -r) .config
-```
-
-**Enable TCP Proxy in `menuconfig`:**  
-```bash
-make menuconfig
-```
-Navigate to:  
-`Networking support → Networking options → TCP: advanced congestion control`  
-Enable the option:  
-`[M] TCP Proxy congestion control`
-
-#### Compile and Install the Kernel
-
-```bash
-# Compile the entire kernel
-make -j $(nproc)
-
-# Install the Linux Kernel Modules
-sudo make modules_install
-
-# Install the Linux Kernel
-sudo make install
-
-# Reboot to use the new kernel
-sudo reboot
-```
-
-#### Usage: Setting and Activating TCP Proxy as Default Congestion Control
-
-**Load the Module:**
-```bash
-# With Default Delegate (reno)
-sudo modprobe tcp_proxy
-
-# With Specific Delegate
-sudo modprobe tcp_proxy delegate_cc=reno
-```
-
-**Set Proxy as Active CC Algorithm:**
-```bash
-sudo sysctl -w net.ipv4.tcp_congestion_control=proxy
-```
-
-**Verify Configuration:**
-```bash
-# Available CC Algorithms
-sysctl net.ipv4.tcp_available_congestion_control
-
-# Active CC Algorithm
-cat /proc/sys/net/ipv4/tcp_congestion_control
-```
-
-**Switch Delegate at Runtime:**
-```bash
-# Switch to custom CC algorithm
-echo -n "llm_cc_v0" | sudo tee /sys/module/tcp_proxy/parameters/delegate_cc
-
-# Switch to reno
-echo -n "reno" | sudo tee /sys/module/tcp_proxy/parameters/delegate_cc
-```
-
-**Unload the Module:**
-```bash
-sudo modprobe -r tcp_proxy
-```
-
-#### Verification and Troubleshooting
-
-```bash
-# Check available CC algorithms
-sysctl net.ipv4.tcp_available_congestion_control
-
-# Confirm active CC algorithm
-cat /proc/sys/net/ipv4/tcp_congestion_control
-
-# Read current delegate
-cat /sys/module/tcp_proxy/parameters/delegate_cc
-```
+👉 Detailed kernel configuration and installation instructions are available in the [congestion-control-agent README](./congestion-control-agent/README.md).
 
 ### 1.2 AI-Driven Congestion Control Agent
 
-This subsection includes the implementation and experiments for the AI-Driven Congestion Control Agent:
+The Congestion Control Agent leverages LLM reasoning to monitor network state and autonomously adapt transport behavior:
 
-- Agent architecture and prompt design
-- Dynamic CC scheme selection and code generation
-- Integration with the Linux kernel TCP stack
-- Mininet-WiFi topology and experiment scripts
-- Performance results and visualizations
+- Agent architecture and system prompts  
+- Dynamic CC scheme selection and parameter tuning  
+- Runtime code generation for new congestion control algorithms  
+- Integration with the Linux kernel TCP stack  
 
-See the [`congestion-control-agent/`](./congestion-control-agent/) directory for details.
+👉 See the [congestion-control-agent README](./congestion-control-agent/README.md) for implementation details, agent configuration, and usage.
+
+### 1.3 Mininet-WiFi Topology and Experiments
+
+Experiments are conducted in **Mininet-WiFi**, where custom CC schemes are evaluated against standard algorithms under diverse conditions (e.g., wireless, lossy links).  
+This section includes:
+- Testbed setup and network topology  
+- Experiment scripts and automation  
+- Performance evaluation and visualization of results  
+
+👉 See the [congestion-control-agent](./congestion-control-agent/) directory for implementation details, experiment code, and usage examples.
 
 ---
 
