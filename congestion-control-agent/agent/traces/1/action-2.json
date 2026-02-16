@@ -1,0 +1,52 @@
+{
+    "timestamp": 1770074812.6347039,
+    "step": 2,
+    "session_id": "1",
+    "input_context": {
+        "active_cc": "bbr1",
+        "metrics": {
+            "status": "success",
+            "file": "1.csv",
+            "data_points": 147155,
+            "metrics": {
+                "cwnd": {
+                    "avg": 498.92,
+                    "std": 120.0,
+                    "min": 4,
+                    "max": 658
+                },
+                "rate_mbps": {
+                    "avg": 17.67,
+                    "std": 4.62,
+                    "min": 0,
+                    "max": 1654,
+                    "current": 17
+                },
+                "rtt_ms": {
+                    "avg": 159.82,
+                    "std": 6.81,
+                    "min": 148,
+                    "max": 1360,
+                    "current": 160
+                }
+            }
+        }
+    },
+    "ai_output": {
+        "decision": "Generate new algorithm",
+        "reasoning_steps": [
+            "The current throughput of 17.67 Mbps is significantly below the target of 50 Mbps, necessitating a more aggressive growth strategy.",
+            "The average RTT of 159.82 ms is well above the 20 ms target, suggesting a high-latency network path where bufferbloat must be minimized.",
+            "BBR1 is currently failing to reach the throughput target, likely due to a conservative estimate of the bandwidth-delay product in this specific environment.",
+            "The new algorithm will implement a hybrid delay-based and loss-based approach to balance throughput and latency goals.",
+            "In the congestion avoidance phase, the window will scale proportionally to the difference between the current RTT and the minimum observed RTT.",
+            "A target CWND of approximately 666 packets is calculated to achieve 50 Mbps at a 160 ms RTT, which the algorithm will aim for.",
+            "The 'llm_ssthresh' function is designed to reduce the window to half of the flight size upon congestion to maintain stability.",
+            "The 'llm_undo_cwnd' function is implemented to allow the window to recover quickly if a packet loss is determined to be spurious."
+        ],
+        "c_code": "#include <linux/module.h>\n#include <net/tcp.h>\n\nstruct llm_cc {\n    u32 min_rtt;\n};\n\nstatic void llm_init(struct sock *sk)\n{\n    struct llm_cc *ca = inet_csk_ca(sk);\n    ca->min_rtt = 0x7fffffff;\n}\n\nstatic u32 llm_ssthresh(struct sock *sk)\n{\n    const struct tcp_sock *tp = tcp_sk(sk);\n    return max(tp->snd_cwnd >> 1, 2U);\n}\n\nstatic void llm_cong_avoid(struct sock *sk, u32 ack, u32 acked)\n{\n    struct tcp_sock *tp = tcp_sk(sk);\n    struct llm_cc *ca = inet_csk_ca(sk);\n    u32 rtt = tp->srtt_us >> 3;\n\n    if (!tcp_is_cwnd_limited(sk))\n        return;\n\n    if (rtt < ca->min_rtt)\n        ca->min_rtt = rtt;\n\n    if (tcp_in_slow_start(tp)) {\n        tcp_slow_start(tp, acked);\n    } else {\n        if (rtt > ca->min_rtt + 2000) {\n            if (tp->snd_cwnd > 20)\n                tp->snd_cwnd--;\n        } else {\n            if (tp->snd_cwnd < 1000) {\n                tp->snd_cwnd_cnt += acked;\n                if (tp->snd_cwnd_cnt >= tp->snd_cwnd) {\n                    tp->snd_cwnd_cnt = 0;\n                    tp->snd_cwnd++;\n                }\n            }\n        }\n    }\n}\n\nstatic u32 llm_undo_cwnd(struct sock *sk)\n{\n    const struct tcp_sock *tp = tcp_sk(sk);\n    return max(tp->snd_cwnd, tp->prior_cwnd);\n}\n\nstatic struct tcp_congestion_ops llm_cc_ops = {\n    .init = llm_init,\n    .ssthresh = llm_ssthresh,\n    .cong_avoid = llm_cong_avoid,\n    .undo_cwnd = llm_undo_cwnd,\n    .name = \"llm_cc\",\n    .owner = THIS_MODULE,\n};\n\nstatic int __init llm_cc_register(void)\n{\n    return tcp_register_congestion_control(&llm_cc_ops);\n}\n\nstatic void __exit llm_cc_unregister(void)\n{\n    tcp_unregister_congestion_control(&llm_cc_ops);\n}\n\nmodule_init(llm_cc_register);\nmodule_exit(llm_cc_unregister);\nMODULE_LICENSE(\"GPL\");\nMODULE_DESCRIPTION(\"LLM-based Delay-Aware Congestion Control\");"
+    },
+    "outcome": {
+        "compilation_success": null
+    }
+}

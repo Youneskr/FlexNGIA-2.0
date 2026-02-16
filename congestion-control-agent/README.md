@@ -1,236 +1,456 @@
-# Congestion Control Agent
+# AI-Driven Congestion Control Agent
+
+<div align="center">
+
+[![LangGraph](https://img.shields.io/badge/🦜🕸️-LangGraph-orange?style=flat)](https://langchain-ai.github.io/langgraph/)
+[![Mininet-WiFi](https://img.shields.io/badge/📶-Mininet_WiFi-green?style=flat)](https://github.com/intrig-unicamp/mininet-wifi)
+[![Linux Kernel](https://img.shields.io/badge/🐧-Linux_Kernel-black?style=flat)](https://www.kernel.org/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat)](https://www.python.org/)
+
+</div>
+
+---
 
 ## Overview
-This directory contains the implementation and experiments for the **AI-Driven Congestion Control Agent**.
 
-It includes:
-- A custom Linux kernel with a TCP Proxy module and real-time TCP metric monitoring
-- An LLM-driven agent for congestion control scheme design and switching
-- Experimentation scripts using Mininet-WiFi
-- Performance results and analysis
+At FlexNGIA 2.0, we engineer autonomous, production-grade systems that close the loop between network telemetry and transport-layer control. This repository delivers a fully autonomous framework for designing, implementing, and deploying TCP Congestion Control (CC) algorithms directly into the Linux kernel.
 
+Our CC agent:
+- Evaluates the current CC performance and overall network behavior
+- Designs a new CC strategy to meet a target QoS profile (throughput/latency)
+- Implements the strategy as valid kernel C code
+- Compiles and hot‑swaps the module into the running kernel—no reboot required
+
+All of this is orchestrated by an LLM-powered agent built on LangGraph (part of the LangChain ecosystem) for robust control flow, state, tooling, and observability.
+
+---
+
+## Directory Structure
+
+```text
+.
+├── agent/                  # The AI Brain (LangGraph / LangChain)
+│   ├── main.py             # Agent entrypoint
+│   ├── graph_brain.py      # Graph and nodes definition
+│   ├── schemas.py          # Structured outputs & graph state
+│   ├── tools/              # System Interaction Tools (Make, Insmod, Logs, Metrics)
+│   ├── traces/             # LLM reasoning logs (step-by-step decisions)
+│   └── workspace/          # Build area (.c files, .ko modules)
+├── mininet/                # Network emulation
+│   ├── topo.py             # WiFi topology definition
+│   ├── h1-client.py        # Traffic generator
+│   └── h2-server.py        # Traffic sink
+├── results/                # Raw experiment data (CSV)
+├── analysis/               # Visualization scripts
+├── helpers/                # Background daemons (metrics collection, etc.)
+└── run_test.sh             # Master orchestration script
+```
+
+Key files (quick links):
+- Agent entrypoint: [agent/main.py](agent/main.py)
+- Graph definition: [agent/graph_brain.py](agent/graph_brain.py)
+- State & schemas: [agent/schemas.py](agent/schemas.py)
+- Tooling:
+  - Compiler/load: [agent/tools/compiler.py](agent/tools/compiler.py)
+  - Active CC reader: [agent/tools/get_current_cc.py](agent/tools/get_current_cc.py)
+  - Metrics aggregator: [agent/tools/get_metrics_summary.py](agent/tools/get_metrics_summary.py)
+- Emulation:
+  - Topology: [mininet/topo.py](mininet/topo.py)
+  - Client: [mininet/h1-client.py](mininet/h1-client.py)
+  - Server: [mininet/h2-server.py](mininet/h2-server.py)
+- Analysis: [analysis/plot_results.py](analysis/plot_results.py)
+- Orchestration: [run_test.sh](run_test.sh)
+
+---
+
+## Table of Contents
+
+- [1. LangChain / LangGraph Agent Architecture](#1-langchain--langgraph-agent-architecture)
+  - [1.1 Why LangGraph?](#11-why-langgraph)
+  - [1.2 Graph Model: Nodes, Edges, Workflow](#12-graph-model-nodes-edges-workflow)
+  - [1.3 Graph State (Shared Memory)](#13-graph-state-shared-memory)
+  - [1.4 Tools Integration](#14-tools-integration)
+  - [1.5 Structured Output (Schemas)](#15-structured-output-schemas)
+  - [1.6 Agent Nodes](#16-agent-nodes)
+  - [1.7 Graph Visualization](#17-graph-visualization)
+  - [1.8 Run the Agent](#18-run-the-agent)
+  - [1.9 LangSmith for Debugging and Monitoring](#19-langsmith-for-debugging-and-monitoring)
+- [2. Network Emulation & Metrics](#2-network-emulation--metrics)
+  - [2.1 Mininet-WiFi Topology](#21-mininet-wifi-topology)
+  - [2.2 Metric Collection (helpers/)](#22-metric-collection-helpers)
+  - [2.3 Analysis & Visualization (analysis/)](#23-analysis--visualization-analysis)
+  - [2.4 Automation (run_testsh)](#24-automation-run_testsh)
+- [3. Getting Started](#3-getting-started)
+  - [3.1 Prerequisites](#31-prerequisites)
+  - [3.2 Installation](#32-installation)
+- [4. How to Execute the Agent](#4-how-to-execute-the-agent)
+  - [4.1 Full Automated Test](#41-full-automated-test)
+  - [4.2 Manual Execution](#42-manual-execution)
+- [5. Summary](#5-summary)
+
+---
+
+## 1. LangChain / LangGraph Agent Architecture
+
+### 1.1 Why LangGraph?
+
+LangGraph is a Python framework for building agentic and multi-agent applications where an LLM controls application flow. We use it to deliver a graph-based AI system that:
+- Automates the full pipeline: evaluation → design → coding → compilation
+- Provides first-class state management, tooling, routing, retry, and debugging
+
+This replaces brittle, one-off control flow with a proven, observable, and extensible architecture.
+
+---
+
+### 1.2 Graph Model: Nodes, Edges, Workflow
+
+The agent is modeled as a graph:
+- Nodes: atomic units of work (Python functions, LLM calls, tool invocations)
+- Edges: directed connections encoding workflow and routing
+- Graph: orchestrates sequencing, branching, retries, and loops
+
+In our pipeline, each stage is a node. Nodes can be:
+- Pure Python functions
+- LLM-powered components using LangChain primitives
+- Hybrids that call tools and shell commands
+
+Workflow and routing:
+- Example: Evaluator → Architect → Coder → Compiler
+- Conditional control: on compile error, route back to Coder
+- This enables cyclic, self-correcting workflows with clear state boundaries
+
+---
+
+### 1.3 Graph State (Shared Memory)
+
+Each node:
+1) Receives the current shared state, 2) reads what it needs, 3) writes its outputs, 4) returns an updated state.
+
+The state is defined in [agent/schemas.py](agent/schemas.py):
+
+```python
+class AgentState(TypedDict):
+    """The memory passed between nodes"""
+    session_id: str
+    step_count: int
+    metrics: dict
+    current_cc: str
+    target_cc_name: str
+    
+    # 7-step analysis
+    evaluator_data: Optional[EvaluatorOutput]
+    architect_data: Optional[ArchitectOutput]
+    
+    # Execution
+    c_code: str
+    compiler_output: str
+    error: bool
+    retry_count: int
+```
+
+Field explanations:
+- `session_id`: Unique ID for the current experiment run; used for filenames, logs, and results.
+- `step_count`: Number of steps (node transitions) taken so far; useful for debugging and safety limits.
+- `metrics`: Latest network telemetry (throughput, RTT, cwnd, retransmissions, etc.).
+- `current_cc`: Name of the currently active kernel CC algorithm (e.g., `cubic`, `bbr`, `llm_cc_v1`).
+- `target_cc_name`: Name the agent intends to give to the new CC algorithm/module.
+- `evaluator_data` (EvaluatorOutput): Structured diagnostic output from the Evaluator node (bottleneck type, narrative, summaries).
+- `architect_data` (ArchitectOutput): Structured blueprint from the Architect node (formulas, control logic).
+- `c_code`: Latest C implementation generated by the Coder node.
+- `compiler_output`: Build + kernel tooling logs (stdout/stderr from `make`, `insmod`, `rmmod`).
+- `error`: Flag indicating whether the last operation (usually compilation or module load) failed.
+- `retry_count`: Number of times the agent has attempted to fix and recompile the module.
+
+---
+
+### 1.4 Tools Integration
+
+LangGraph/LangChain expose tools as standard Python callables that the agent can invoke.
+
+Our tools (see [agent/tools/](agent/tools/)):
+- [agent/tools/compiler.py](agent/tools/compiler.py)
+  - Wraps `make`, `insmod`, and `rmmod`
+  - Builds `.ko` modules in [agent/workspace/](agent/workspace/)
+  - Loads/unloads the CC kernel module and updates `current_cc`
+- [agent/tools/get_current_cc.py](agent/tools/get_current_cc.py)
+  - Reads the active congestion control algorithm from `/proc` / `/sys`
+- [agent/tools/get_metrics_summary.py](agent/tools/get_metrics_summary.py)
+  - Collects live network metrics for the agent’s decisions
+- Trace logging (stored under [agent/traces/](agent/traces/))
+  - Each `session_id` gets its own file set for post-mortem analysis
+
+These tools are invoked from inside graph nodes to keep decisions data-driven and observable.
+
+---
+
+### 1.5 Structured Output (Schemas)
+
+Naively parsing free-form LLM outputs is brittle. We enforce structure:
+- Define schemas with typed Python (TypedDict, pydantic, etc.)
+- Prompt the LLM to strictly follow those schemas
+- Validate and parse outputs automatically
+
+In [agent/schemas.py](agent/schemas.py):
+- `EvaluatorOutput`: `diagnosis_steps`, `bottleneck_type`, `qos_gaps`, etc.
+- `ArchitectOutput`: `high_level_strategy`, `ssthresh_logic`, `cong_avoid_logic`, etc.
+- Similar patterns can be applied to `Coder` and `Compiler` outputs
+- Each node returns a type-safe Python object that is persisted in `AgentState`
+
+This guarantees well-formed data across the pipeline—no ad-hoc parsers.
+
+---
+
+### 1.6 Agent Nodes
+
+The CC agent’s core logic is split into four primary LangGraph nodes, plus logging.
+
+#### 1) Evaluator Node
+- Role
+  - Analyzes current network performance and CC behavior
+  - Identifies bottlenecks and explains them in a multi-step reasoning chain
+- Input (from state)
+  - `metrics`, `current_cc`, `session_id`, `step_count`
+- Structured output (EvaluatorOutput)
+  - `diagnosis_steps`, `bottleneck_type` (e.g., "bandwidth_limited" / "latency_limited" / "loss_limited"), `qos_summary`, `recommendations`
+- State modifications
+  - Writes `evaluator_data`
+  - Increments `step_count`
+
+---
+
+#### 2) Architect Node
+- Role
+  - Translates the evaluator’s diagnosis into a mathematical design for a new CC algorithm
+  - Specifies how `ssthresh`, `cong_avoid`, `undo_cwnd`, etc. should behave
+- Input (from state)
+  - `evaluator_data`, `metrics`, `current_cc`, `target_cc_name` (may initialize or update)
+- Structured output (ArchitectOutput)
+  - `high_level_strategy`, `ssthresh_logic`, `cong_avoid_logic`, `undo_cwnd_logic`, `safety_constraints`
+- State modifications
+  - Writes `architect_data`
+  - Sets or refines `target_cc_name` (e.g., `llm_cc_v1`)
+  - Increments `step_count`
+
+---
+
+#### 3) Coder Node
+- Role
+  - Converts the architect’s design into valid Linux kernel C code
+  - Uses a strict kernel skeleton to ensure ABI compatibility and safety
+  - Performs self-correction: on compile errors, reads logs and fixes the code
+- Input (from state)
+  - `architect_data`, `target_cc_name`, previous `c_code` (if retrying), `compiler_output` (if previous build failed), `retry_count`
+- Structured output (e.g., CoderOutput)
+  - `c_code` (full `.c` source code), `comments` (major design decisions), `applied_fixes` (on retries)
+- State modifications
+  - Writes `c_code`
+  - Clears or updates `error` (typically reset before compilation)
+  - Increments `step_count`
+
+---
+
+#### 4) Compiler Node
+- Role
+  - System integrator: builds and deploys the generated C code as a kernel module
+  - Coordinates with [agent/tools/compiler.py](agent/tools/compiler.py) and other tools
+- Input (from state)
+  - `c_code`, `target_cc_name`, `session_id`, `retry_count`
+- Structured output (e.g., CompilerOutput)
+  - `compiler_output` (logs from `make`, `insmod`, `rmmod`), `success` (bool), `activated_cc_name`
+- State modifications
+  - Writes `compiler_output`
+  - Updates `current_cc`
+  - Sets `error` (true if build or `insmod` failed, false otherwise)
+  - Increments `retry_count` on failure
+  - Increments `step_count`
+  - If `error` is true, workflow routes back to Coder for self-correction
+
+---
+
+#### 5) Logger / Tracing
+- Logger role
+  - Records each node’s inputs, outputs, prompts, and tool calls
+  - Writes chronological traces for post-mortem analysis
+- Implementation
+  - Traces written to [agent/traces/](agent/traces/)
+  - Each `session_id` gets its own trace directory or file set
+
+---
+
+### 1.7 Graph Visualization
 
 <div align="center">
 
-[![Paper](https://img.shields.io/badge/📄-Paper-yellow?style=flat)](https://arxiv.org/abs/2509.02124)
-[![FlexNGIA Website](https://img.shields.io/badge/🌐-flexngia.net-blue?style=flat)](https://www.flexngia.net/)
+![LangGraph Agent Workflow](./agent/agent_architecture.png)
 
 </div>
+
+---
+
+### 1.8 Run the Agent
+
+Install dependencies and start the agent (root privileges required for kernel interactions):
+
+```bash
+pip install -r requirements.txt
+```
+
+```bash
+sudo python3 agent/main.py
+```
+
+The agent listens for new experiments by monitoring the `results` folder. Once a new session is created, it will start the workflow, generate the congestion control module, compile it, and load it into the kernel. Monitor progress in real time via detailed logs in [agent/traces/](agent/traces/).
+
+---
+
+### 1.9 LangSmith for Debugging and Monitoring
+
+LangSmith provides end-to-end tracing and evaluation for LangChain apps.
+
+In this project, you can:
+- Enable tracing to see the graph execute in real time
+- Inspect node-level inputs/outputs, LLM prompts and responses, tool calls, latency, and errors
+
+Basic setup (if you have a LangSmith account):
+
+```bash
+export LANGCHAIN_TRACING_V2="true"
+export LANGCHAIN_ENDPOINT="https://api.smith.langchain.com"
+export LANGCHAIN_API_KEY="YOUR_LANGSMITH_KEY"
+export LANGCHAIN_PROJECT="flexngia-cc-agent"
+```
+
+Then run the agent and inspect traces in the LangSmith UI.
+
 <div align="center">
-    <img src="../resources/logo.webp" alt="FlexNGIA Logo" width="250">
+
+![Langsmith example](../resources/langsmith.png)
+
 </div>
 
 ---
 
-# 1. Kernel Installation and Configuration
-This section provides a comprehensive guide for setting up the kernel, including prerequisites, source acquisition, configuration, compilation, and module installation. We use a **customized Linux kernel version 5.13.12** (based on Google’s BBR kernel) that integrates the TCP Proxy Congestion Control module along with real-time TCP metric monitoring capabilities.
+## 2. Network Emulation & Metrics
 
-## 1.1 Prerequisites
-Install required development tools:
-```bash
-sudo apt-get install build-essential libncurses-dev bison flex libssl-dev libelf-dev
-```
+### 2.1 Mininet-WiFi Topology
 
-Install the `dwarves` package (required for modern kernel builds):
-```bash
-sudo apt install dwarves
-```
+The network is defined in [mininet/topo.py](mininet/topo.py). It simulates a wireless scenario:
+- H1 (Client): Generates traffic using `iperf3`
+- H2 (Server): Receives traffic
+- AP1 (Access Point): Limits bandwidth and adds delay (e.g., satellite or unstable links)
 
-## 1.2 Kernel Source Installation
-Download the **customized** Linux kernel version 5.13.12 (based on Google’s BBR kernel):  
-[Download Kernel Source](https://ucf5a8c83aca9580ec1b76962f16.dl.dropboxusercontent.com/cd/0/get/CxCkxaLzP-PGRD_kDZzDFWuT6O5CfRKhbHG9jj1jFeUS5f6KiI84qq8gJsm2WzQlxYSQ8c9uDPnUXS8KWk2Nuu0pAx3TwMA5D9HG1akM2-xbiGhrDSIhKeVkLoKlyTWrTxNe26Zcmce78CkQZtCrMkcW3QpqVo-T9ZbYGLPrlbo_qg/file?_download_id=26587710815208965626527659032575300133024348866439558685271136431179&_log_download_success=1&_notify_domain=www.dropbox.com&dl=1)
+Topology:
 
-After downloading, extract and enter the source directory:
-```bash
-unzip kernel_5.13.12.zip
-cd kernel_5.13.12
-```
+<div align="center">
 
-## 1.3 First-Time Compilation Setup
-To disable trusted keys and revocation keys (useful for custom kernel builds):
-```bash
-CONFIG_SYSTEM_TRUSTED_KEYS=""
-scripts/config --set-str SYSTEM_TRUSTED_KEYS ""
-scripts/config --disable SYSTEM_REVOCATION_KEYS
-```
+![Langsmith example](../resources/TOPO.png)
 
-## 1.4 Kernel Configuration
-Copy your current kernel configuration to the working directory:
-```bash
-cp -v /boot/config-$(uname -r) .config
-```
+</div>
 
-Open the kernel configuration menu to `enable the TCP Proxy module`: 
-```bash
-make menuconfig
-```
+---
 
-In the menu, navigate to:
-```
-Networking support → Networking options → TCP: advanced congestion control
-[M] TCP Proxy congestion control
-```
+### 2.2 Metric Collection (helpers/)
 
-Select the module (`[M]`), save the configuration, and exit.
-## 1.5 Compilation & Installation
+To monitor CC performance, kernel-level TCP statistics are collected in real time:
+- Daemon: metrics are collected via [agent/tools/get_metrics_summary.py](agent/tools/get_metrics_summary.py)
+- Storage: Data is saved to `results/{session_id}.csv`
 
-```bash
-# Compile the kernel using all available CPU cores
-make -j $(nproc)
-```
+These metrics are fed back into the LangGraph state as `metrics`, closing the loop between environment and agent.
 
-```bash
-# Install the kernel modules
-sudo make modules_install
-```
+---
+
+### 2.3 Analysis & Visualization (analysis/)
+
+Use [analysis/plot_results.py](analysis/plot_results.py) to convert raw CSV logs into visual dashboards.
+
+---
+
+### 2.4 Automation (run_test.sh)
+
+[run_test.sh](run_test.sh) automates the full AI-driven loop:
+- Cleans previous kernel modules (`rmmod`)
+- Starts Mininet-WiFi topology
+- Launches the LangGraph-based CC agent
+- Waits for completion and generates plots
+
+---
+
+## 3. Getting Started
+
+### 3.1 Prerequisites
+
+- Ubuntu 20.04 / 22.04 (Kernel 5.15+ recommended)
+- Root privileges (for Mininet and kernel modules)
+- Python 3.10+
+- API key for an LLM provider (e.g., OpenAI / Groq) stored in `.env`
+- Optional: LangSmith account for advanced tracing
+
+---
+
+### 3.2 Installation
 
 ```bash
-# Install the newly compiled kernel
-sudo make install
-```
+# 1) System dependencies
+sudo apt update
+sudo apt install -y build-essential git openvswitch-switch python3-pip
 
-```bash
-# Reboot the system to load the new kernel
-sudo reboot
+# 2) Python dependencies
+pip install -r agent/requirements.txt
 ```
 
 ---
 
-# 2. TCP Proxy Congestion Control Module
+## 4. How to Execute the Agent
 
-## 2.1 Overview
-The **TCP Proxy** is a minimal congestion control algorithm that:
-- Delegates its behavior to another CC algorithm chosen at runtime.
-- Allows seamless switching between algorithms.
-- Forwards standard callbacks (`ssthresh()`, `cong_avoid()`, `undo_cwnd()`).
-- Default delegate: `reno` (modifiable at runtime).
+You can either run the full automated pipeline or start components manually.
 
-## 2.2 How It Works
-- **Delegation model:** `delegate_cc` parameter points to target CC (e.g., `reno`, `llm_cc_v0`).
-- **Lifecycle:** On load, registers as a CC algorithm, resolves delegate, and pins its module. On unload, releases reference.
-- **Runtime control:** `/sys/module/tcp_proxy/parameters/delegate_cc`
-
-## 2.3 Compatibility
-- Compatible with traditional loss-based CC algorithms (e.g., `reno`).
-- Not suitable for BBR-like algorithms that use `cong_control()`.
-
-## 2.4 Usage
+### 4.1 Full Automated Test
 
 ```bash
-# Load the TCP Proxy module with the default delegate (reno)
-sudo modprobe tcp_proxy delegate_cc
+sudo ./run_test.sh
 ```
 
-```bash
-# Load the TCP Proxy module and specify a delegate CC scheme at load time (e.g., reno)
-sudo modprobe tcp_proxy delegate_cc=reno
-```
-
-```bash
-# Set the TCP Proxy as the active congestion control algorithm
-sudo sysctl -w net.ipv4.tcp_congestion_control=proxy
-```
-
-```bash
-# Check the currently active delegate CC scheme for the TCP Proxy
-sudo cat /sys/module/tcp_proxy/parameters/delegate_cc
-```
-
-```bash
-# Dynamically switch the delegate CC scheme at runtime (e.g., to llm_cc_v0)
-echo -n "llm_cc_v0" | sudo tee /sys/module/tcp_proxy/parameters/delegate_cc
-```
-
+This will:
+1. Start Mininet-WiFi topology
+2. Launch the LangGraph-based CC agent ([agent/main.py](agent/main.py))
+3. Run an end-to-end experiment
+4. Save:
+   - Metrics to `results/{session_id}.csv`
+   - Agent traces to [agent/traces/](agent/traces/)
+   - Generated CC C code to [agent/workspace/](agent/workspace/)
+   - Plots to [analysis/](analysis/) (or `results/` depending on configuration)
 
 ---
 
-## 3. TCP Metrics Monitoring
+### 4.2 Manual Execution
 
-### 3.1 Overview
-The kernel is instrumented to capture and expose real-time TCP metrics from kernel space to user space, including:
-- Congestion Window (CWND)
-- Round-Trip Time (RTT)
-- TCP throughput
-- Packet losses and retransmissions
-- Extendable to monitor additional TCP-related metrics
+In separate terminals:
 
-### 3.2 Monitoring Module
-The header file `include/linux/track_metrics.h` defines the `track` function, which has the following prototype:
-
-```c
-track(CC_name, source_address, destination_address, source_port, destination_port, Metric_ID, Metric_value);
-```
-
-For detailed information about the `Metric_ID` corresponding to each metric, refer to the `include/linux/track_metrics.h` file. To add new `Metric_ID` values for extracting additional metrics, update this file accordingly.
-
-By including this header (`#include <linux/track_metrics.h>`) in a kernel C file, the `track` function can be invoked at any appropriate location to extract metrics.  
-
-Currently, this header is included in several TCP-related source files:
-- `tcp_rate.c` for monitoring TCP throughput
-- `tcp_input.c` for extracting RTT, losses, and retransmissions
-- `tcp_cong.c` for monitoring the growth of the congestion window (CWND) for TCP Reno
-
-For example, the kernel monitors the growth of the congestion window (CWND) for TCP Reno in `net/ipv4/tcp_cong.c`:
-
-```c
-#include <linux/track_metrics.h>
-
-/* Slow start threshold is half the congestion window (min 2) */
-u32 tcp_reno_ssthresh(struct sock *sk)
-{
-    const struct tcp_sock *tp = tcp_sk(sk);
-    struct inet_sock *inet = inet_sk(sk);
-    __be32 saddr = inet->inet_saddr;
-    __be32 daddr = inet->inet_daddr;
-    unsigned short sport = ntohs(inet->inet_sport);
-    unsigned short dport = ntohs(inet->inet_dport);
-
-    track("RENO", saddr, daddr, sport, dport, CWND, tp->snd_cwnd);
-    return max(tp->snd_cwnd >> 1U, 2U);
-}
-```
-
-Using this approach, the `track` function can be leveraged to monitor any metric from any TCP congestion control module.
-
-> **Note:** Currently, only communications with source IP `10.0.0.1` and destination IP `10.0.0.2` are monitored. To track other IPs, update `include/linux/track_metrics.h`, then recompile and reinstall the kernel.
-
-All metrics for monitored TCP flows are available in user space and logged in the kernel buffer.  
-
-### 3.3 Viewing Metrics in Real Time
-1. **Via terminal log:**  
 ```bash
-dmesg --follow
+# Terminal 1: Start network topology
+cd mininet
+sudo python3 topo.py
 ```
-2. **Via system log:**  
-Check `/var/log/kern.log` for all kernel messages and extracted metrics.
 
-This monitoring module is the same as used in the study:
+```bash
+# Terminal 2: Start the LangGraph CC agent
+cd agent
+sudo python3 main.py
+```
 
-📘 **Reference:**  
-Korbi, Younes, Mohamed Faten Zhani, and John Kaippallimalil. "Congestion Control in Wi-Fi Networks—State of the Art, Performance Evaluation, and Key Research Directions." *IEEE Access*, 2024. DOI: [10.1109/ACCESS.2024.3425271](https://doi.org/10.1109/ACCESS.2024.3425271)
-
----
-
-## 4. AI-Driven Congestion Control Agent
-
-### 4.1 Design
-The agent leverages LLM-based reasoning to:
-- Monitor real-time TCP metrics
-- Adapt congestion control dynamically
-- Generate and load new CC algorithms at runtime
-
-### 4.2 Implementation
-- Prompt templates for CC decision-making
-- Python-based orchestration logic
-- Kernel-space integration for runtime switching
-- Support for hot-reloading custom congestion control code
+Optional: export the LangSmith variables (see [1.9](#19-langsmith-for-debugging-and-monitoring)) to monitor the graph execution in real time.
 
 ---
 
-## 5. Mininet-WiFi Topology and Experiments
+## 5. Summary
 
-
----
-
-## 📊 Results
-(Figures and result summaries will be added here, e.g., throughput curves, fairness indices, CWND/RTT plots.)
+- The CC agent is a LangGraph / LangChain-based autonomous system that:
+  - Evaluates current CC and network performance
+  - Designs new CC logic
+  - Implements it in C
+  - Compiles and hot-swaps it into the Linux kernel
+- LangGraph provides:
+  - A graph abstraction (nodes, edges) for complex workflows
+  - A shared state (`AgentState`) for coordination
+  - Native support for tools and structured outputs
+- LangSmith enables deep tracing to inspect, monitor, and debug the entire workflow in real time.
