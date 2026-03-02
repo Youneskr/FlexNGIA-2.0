@@ -1,4 +1,4 @@
-# High-Precision Event-Driven TCP Monitoring in the Linux Kernel
+# Custom TCP Kernel Modules
 
 <div align="center">
 <div align="center">
@@ -12,22 +12,20 @@
 
 ## 📑 Table of Contents
 
-- [📖 Introduction \& Motivation](#-introduction--motivation)
-- [1. Modifying the TCP Socket Implementation](#1-modifying-the-tcp-socket-implementation)
-  - [🧠 Concept: The tcp\_sock Structure](#-concept-the-tcp_sock-structure)
-  - [💻 Implementation](#-implementation)
-- [2. The Control Interface: setsockopt](#2-the-control-interface-setsockopt)
-  - [🧠 Concept: What is setsockopt?](#-concept-what-is-setsockopt)
-  - [💻 Implementation](#-implementation-1)
-- [3. Creating the Tracepoint (The Hook)](#3-creating-the-tracepoint-the-hook)
-  - [🧠 Concept: What is a Tracepoint?](#-concept-what-is-a-tracepoint)
-  - [💻 Implementation](#-implementation-2)
-- [4. Installing the Tracepoint](#4-installing-the-tracepoint)
-  - [🧠 Concept: Where do we put the hook?](#-concept-where-do-we-put-the-hook)
-  - [💻 Implementation](#-implementation-3)
-- [🚀 Execution \& Reading the Data](#-execution--reading-the-data)
-  - [1. Arming the Tracepoint (Run as Root)](#1-arming-the-tracepoint-run-as-root)
-  - [2. Reading the Real-Time Stream](#2-reading-the-real-time-stream)
+- [Part 1: High-Precision Event-Driven TCP Monitoring](#part-1-high-precision-event-driven-tcp-monitoring)
+  - [📖 Introduction \& Motivation](#-introduction--motivation)
+  - [1. Modifying the TCP Socket Implementation](#1-modifying-the-tcp-socket-implementation)
+  - [2. The Control Interface: setsockopt](#2-the-control-interface-setsockopt)
+  - [3. Creating the Tracepoint (The Hook)](#3-creating-the-tracepoint-the-hook)
+  - [4. Installing the Tracepoint](#4-installing-the-tracepoint)
+  - [🚀 Execution \& Reading the Data](#-execution--reading-the-data)
+- [Part 2: TCP Proxy — Runtime-Switchable Congestion Control](#part-2-tcp-proxy--runtime-switchable-congestion-control)
+  - [📌 Overview](#-overview)
+  - [⚙️ How It Works](#️-how-it-works)
+  - [🛠 Compatibility and Limitations](#-compatibility-and-limitations)
+  - [🏗 Build and Install](#-build-and-install)
+  - [🚀 Usage](#-usage)
+  - [🔍 Verification and Troubleshooting](#-verification-and-troubleshooting)
 
 ---
 
@@ -52,6 +50,10 @@ If you use this implementation in your research, please cite the following paper
   doi={10.1109/ACCESS.2024.3425271}
 }
 ```
+
+---
+
+# Part 1: High-Precision Event-Driven TCP Monitoring
 
 ## 📖 Introduction & Motivation
 
@@ -255,6 +257,180 @@ tcp_monitor: id=10.0.0.1->10.0.0.2 srate=5 Mbps cwnd=11
 tcp_monitor: id=10.0.0.1->10.0.0.2 srate=12 Mbps cwnd=12
 tcp_monitor: id=10.0.0.1->10.0.0.2 srate=48 Mbps cwnd=24
 ```
+
+---
+
+# Part 2: TCP Proxy — Runtime-Switchable Congestion Control
+
+A minimal TCP congestion control (CC) proxy that delegates all congestion behavior to another CC algorithm chosen at runtime. The proxy itself implements no control logic—it simply forwards the kernel's CC callbacks to the selected delegate.
+
+---
+
+## 📌 Overview
+
+- **Purpose:** Enables rapid switching between congestion control algorithms at runtime for experimentation, or orchestrated trials—without requiring a kernel reboot or recompilation.
+- **Name:** `proxy` (as a TCP CC algorithm).
+- **Default Delegate:** `reno` (modifiable at runtime).
+- **Forwarded Callbacks:** `ssthresh()`, `cong_avoid()`, `undo_cwnd()`.
+- **Runtime Control:** `/sys/module/tcp_proxy/parameters/delegate_cc`.
+
+> 💡 Use `proxy` as the system-wide CC algorithm and switch the delegate dynamically to compare CC algorithms. The `tcp_proxy` module is perceived by the kernel as a standard congestion control module. It should be set as the active congestion control algorithm in the Linux system by configuring `proxy` as the default congestion control. The kernel and the system remain unaware of the delegation mechanism itself, as all delegation is handled internally.
+
+---
+
+## ⚙️ How It Works
+
+- **Delegation Model:**  
+  The module exposes a parameter, `delegate_cc`, which holds the name of the target CC algorithm (e.g., `reno`, `llm_cc_v0`). On load or when the parameter changes, the proxy resolves the delegate using `tcp_ca_find()`, pins its module with `try_module_get()`, and forwards CC callbacks to the delegate.
+
+- **Forwarded Callbacks:**  
+  - `ssthresh()` → Delegate's slow-start threshold function.  
+  - `cong_avoid()` → Delegate's congestion avoidance function.  
+  - `undo_cwnd()` → Delegate's cwnd undo function.
+
+- **Module Parameter:**  
+  - **Name:** `delegate_cc`.  
+  - **Path:** `/sys/module/tcp_proxy/parameters/delegate_cc`.  
+  - **Read/Write:** Yes (requires root privileges).  
+  - **Default Value:** `reno`.
+
+- **Lifecycle:**  
+  On load, the `proxy` registers as a CC algorithm, resolves the default delegate, and pins it. On unload, it releases the delegate's module reference and unregisters itself.
+
+---
+
+## 🛠 Compatibility and Limitations
+
+- **Delegate Requirements:**  
+  The delegate must implement the following callbacks:
+  - `ssthresh()`.
+  - `cong_avoid()`.
+  - `undo_cwnd()`.
+
+- **Compatible With:**  
+  Traditional loss-based CC algorithms such as `reno`.
+
+- **Not Suitable For:**  
+  Algorithms like **BBR**, which use `cong_control()` instead of `cong_avoid()`.
+
+---
+
+## 🏗 Build and Install
+
+### In-Tree Integration
+
+1. **Place the Source File:**  
+   Copy the source file to `net/ipv4/tcp_proxy.c`.
+
+2. **Update Kbuild (`net/ipv4/Makefile`):**  
+   - Open: `net/ipv4/Makefile`.  
+   - Add this line after other TCP congestion modules:  
+     ```make
+     obj-$(CONFIG_TCP_CONG_PROXY) += tcp_proxy.o
+     ```
+
+3. **Add Kconfig Entry (`net/ipv4/Kconfig`):**  
+   - Open: `net/ipv4/Kconfig`.  
+   - Add this at the end (below other CC configs):  
+     ```make
+     config TCP_CONG_PROXY
+           tristate "TCP Proxy congestion control"
+           default y
+           help
+             A TCP congestion control module that delegates control to another algorithm.
+             You can select the delegate at runtime via /sys/module/tcp_proxy/parameters/delegate_cc.
+     ```
+
+4. **Enable in `menuconfig`:**  
+   - From the root of the kernel source directory, run:  
+     ```bash
+     make menuconfig
+     ```
+   - Navigate to:  
+     `Networking support → Networking options → TCP: advanced congestion control`.
+   - Enable the option:  
+     `[M] TCP Proxy congestion control`.
+
+5. **Build and Install:**
+   ```bash
+   make -j"$(nproc)"
+   sudo make modules_install
+   sudo make install
+   sudo reboot
+   ```
+
+---
+
+## 🚀 Usage
+
+### Load the Module
+
+- **With Default Delegate (`reno`):**
+  ```bash
+  sudo modprobe tcp_proxy
+  ```
+
+- **With a Specific Delegate:**
+  ```bash
+  sudo modprobe tcp_proxy delegate_cc=reno
+  ```
+
+### Set Proxy as the Active CC Algorithm
+
+```bash
+sudo sysctl -w net.ipv4.tcp_congestion_control=proxy
+```
+
+### Verify the Configuration
+
+- **Available CC Algorithms:**
+  ```bash
+  sysctl net.ipv4.tcp_available_congestion_control
+  ```
+
+- **Active CC Algorithm:**
+  ```bash
+  cat /proc/sys/net/ipv4/tcp_congestion_control
+  ```
+
+### Switch Delegate at Runtime
+
+- **Switch to a Custom CC Algorithm:**
+  ```bash
+  echo -n "llm_cc_v0" | sudo tee /sys/module/tcp_proxy/parameters/delegate_cc
+  ```
+
+- **Switch to `reno`:**
+  ```bash
+  echo -n "reno" | sudo tee /sys/module/tcp_proxy/parameters/delegate_cc
+  ```
+
+### Unload the Module
+
+```bash
+sudo modprobe -r tcp_proxy
+```
+
+---
+
+## 🔍 Verification and Troubleshooting
+
+- **Check Available CC Algorithms:**
+  ```bash
+  sysctl net.ipv4.tcp_available_congestion_control
+  ```
+
+- **Confirm Active CC Algorithm:**
+  ```bash
+  cat /proc/sys/net/ipv4/tcp_congestion_control
+  ```
+
+- **Read Current Delegate:**
+  ```bash
+  cat /sys/module/tcp_proxy/parameters/delegate_cc
+  ```
+
+---
 
 ## 🤝 Contributing
 
