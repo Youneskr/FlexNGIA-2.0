@@ -31,7 +31,6 @@ All of this is orchestrated by an LLM-powered agent built on LangGraph (part of 
 .
 ├── agent/                  # The AI Brain (LangGraph / LangChain)
 │   ├── main.py             # Agent entrypoint
-│   ├── graph_brain.py      # Graph and nodes definition
 │   ├── schemas.py          # Structured outputs & graph state
 │   ├── tools/              # System Interaction Tools (Make, Insmod, Logs, Metrics)
 │   ├── traces/             # LLM reasoning logs (step-by-step decisions)
@@ -454,3 +453,17 @@ Optional: export the LangSmith variables (see [1.9](#19-langsmith-for-debugging-
   - A shared state (`AgentState`) for coordination
   - Native support for tools and structured outputs
 - LangSmith enables deep tracing to inspect, monitor, and debug the entire workflow in real time.
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Please open an issue or submit a pull request for any improvements or bug fixes.
+
+---
+
+## 📧 Contact
+
+For questions or collaborations, please contact:  
+[mfzhani@flexNGIA.net](mailto:mfzhani@flexNGIA.net)  
+Website: [www.FlexNGIA.net](https://www.flexngia.net/)
