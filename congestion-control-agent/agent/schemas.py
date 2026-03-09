@@ -1,7 +1,4 @@
-from typing import TypedDict, List, Optional
 from pydantic import BaseModel, Field
-
-# --- NODE OUTPUT SCHEMAS ---
 
 class AgentOutput(BaseModel):
     """Output for Node 1: Deep Analysis (Steps 1-7)"""
@@ -14,22 +11,3 @@ class AgentOutput(BaseModel):
     step_7: str = Field(description="7. Predict how a new algorithm will improve performance.")
     justification: str = Field(description="Why this design will fix the identified weaknesses.")
     c_code: str = Field(description="The complete, valid C code for the Linux Kernel module.")
-
-# --- SHARED GRAPH STATE ---
-
-class AgentState(TypedDict):
-    """The memory passed between nodes"""
-    session_id: str
-    step_count: int
-    metrics: dict
-    current_cc: str
-    target_cc_name: str
-    
-    # 7-step analysis
-    Agent_data: Optional[AgentOutput]
-
-    # Execution
-    c_code: str
-    compiler_output: str
-    error: bool
-    retry_count: int

@@ -7,6 +7,8 @@ import subprocess
 from dotenv import load_dotenv
 
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
+
 from langchain_core.prompts import ChatPromptTemplate
 
 from schemas import AgentOutput
@@ -18,9 +20,17 @@ load_dotenv()
 # LLM
 # ---------------------------------------------------------
 
-llm = ChatGoogleGenerativeAI(
-    model="gemini-3-flash-preview",
-    google_api_key=os.getenv("GEMINI_API_KEY"),
+# GEMINI
+# llm = ChatGoogleGenerativeAI(
+#     model="gemini-3-flash-preview",
+#     google_api_key=os.getenv("GEMINI_API_KEY"),
+#     temperature=0
+# )
+
+# GROQ
+llm = ChatGroq(
+    model="llama-3.3-70b-versatile",
+    groq_api_key=os.getenv("GROQ_API_KEY"),
     temperature=0
 )
 
@@ -126,16 +136,27 @@ def escape_braces(text):
 # LLM EXECUTION
 # ---------------------------------------------------------
 
-def run_llm(system_prompt, ifa_report, target_name, previous_code=None, compile_error=None):
+def run_llm(system_prompt, ifa_report, target_name, previous_code=None, current_code=None, compile_error=None):
     context = ifa_report
 
-    if previous_code:
+    # FIRST ATTEMPT → use previous cycle code
+    if previous_code and not current_code:
         context += f"""
             === PREVIOUS GENERATED CONGESTION CONTROL CODE ===
             ```c
                 {previous_code}
             ```
             You may refine or improve this algorithm if necessary.
+        """
+
+    # REPAIR ATTEMPT → use failing code
+    if current_code:
+        context += f"""
+            === CURRENT GENERATED CODE (FAILED TO COMPILE) ===
+            ```c
+                {current_code}
+            ```
+            The code above failed compilation. Fix it.
         """
 
     if compile_error:
@@ -167,12 +188,21 @@ def run_llm(system_prompt, ifa_report, target_name, previous_code=None, compile_
 
 def compile_with_self_repair(system_prompt, report, target_cc, session_dir, cycle, previous_code):
     compile_error = None
+    last_generated_code = None
 
     for attempt in range(3):
         print(f"[Agent] LLM attempt {attempt+1}")
 
-        result = run_llm(system_prompt, report, target_cc, previous_code, compile_error)
+        result = run_llm(
+                    system_prompt,
+                    report,
+                    target_cc,
+                    previous_code if attempt == 0 else None,
+                    current_code=last_generated_code,
+                    compile_error=compile_error
+                )
         code = result.c_code
+        last_generated_code = code
         success, message = compiler.compile_and_load(code, target_cc)
 
         if success:

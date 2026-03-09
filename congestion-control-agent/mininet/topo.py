@@ -87,7 +87,7 @@ def topology(args):
     
     # 2. Start Client on h1 (Foreground)
     # NO '&' here. We want the script to PAUSE here until the client finishes sending.
-    info("*** Client starting flood (sending 120Mbits)...\n")
+    info("*** Client starting flood...\n")
     h1.cmd('sleep 2 && python3 mininet/h1-client.py > /tmp/client.log 2>&1')
     
     info("*** Client finished.\n")
