@@ -1,0 +1,78 @@
+# Given an IFA report, take a decision by applying the 8-step  reasoning process below to maintain the best control of congestion.
+
+# Input expected: IFA Report
+
+# Goal: Evaluate network behavior and Generate a new congestion control algorithm tailored to this session context.
+
+# 8-step reasoning process:
+Step 1: Identify and analyze the current congestion control algorithm, environment, and QoS/QoE status. 
+Step 2: Extract key metrics and trends from the IFA report. 
+Step 3: Recall the application’s target QoS profile and check if they are met. 
+Step 4: Detect (if exist) performance mismatches and link them to Current algorithm behavior. 
+Step 5: Identify missing or weak control traits (if exist). 
+Step 6: Suggest parameter adjustments or behavioral improvements. 
+Step 7: Predict how each action (keep, switch, tune, generate) would affect performance. 
+Step 8: Choose the best action and briefly justify it.
+
+# Important: If the decision is to (d) Generate a new congestion control algorithm, you must respect the following kernel module structure for llm_cc.c:
+
+```c
+#include <linux/module.h>
+#include <linux/init.h>
+#include <linux/types.h>
+#include <linux/kernel.h>
+#include <net/tcp.h>
+
+/* FlexNGIA-LLM Generated Logic */
+
+static u32 {target_name}_ssthresh(struct sock *sk)
+{{
+    const struct tcp_sock *tp = tcp_sk(sk);
+    
+    /* >>> IMPLEMENTATION HERE <<< */
+    /* Implement the Slow Start Threshold logic based on the design. */
+    /* Default fallback: */
+    return max_t(u32, tp->snd_cwnd >> 1, 2U * tp->mss_cache);
+}}
+
+static void {target_name}_cong_avoid(struct sock *sk, u32 ack, u32 acked)
+{{
+    struct tcp_sock *tp = tcp_sk(sk);
+    
+    /* >>> IMPLEMENTATION HERE <<< */
+    /* Implement the Congestion Avoidance logic based on the design. */
+    /* Use: tcp_slow_start(tp, acked) and tcp_cong_avoid_ai(tp, tp->snd_cwnd, acked) */
+}}
+
+static u32 {target_name}_undo_cwnd(struct sock *sk)
+{{
+    const struct tcp_sock *tp = tcp_sk(sk);
+    /* >>> IMPLEMENTATION HERE <<< */
+    return tp->snd_cwnd;
+}}
+
+static struct tcp_congestion_ops {target_name} __read_mostly = {{
+    .name       = "{target_name}",
+    .owner      = THIS_MODULE,
+    .ssthresh   = {target_name}_ssthresh,
+    .cong_avoid = {target_name}_cong_avoid,
+    .undo_cwnd  = {target_name}_undo_cwnd,
+}};
+
+static int __init {target_name}_register(void)
+{{
+    return tcp_register_congestion_control(&{target_name});
+}}
+
+static void __exit {target_name}_unregister(void)
+{{
+    tcp_unregister_congestion_control(&{target_name});
+}}
+
+module_init({target_name}_register);
+module_exit({target_name}_unregister);
+
+MODULE_AUTHOR("FlexNGIA Agent");
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("LLM Generated CC");
+```

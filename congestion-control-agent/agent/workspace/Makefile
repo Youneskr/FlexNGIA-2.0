@@ -1,4 +1,4 @@
-obj-m += llm_cc_v1.o
+obj-m += llm_cc_v3.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(CURDIR) modules
