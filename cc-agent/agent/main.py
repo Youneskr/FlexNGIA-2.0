@@ -96,18 +96,18 @@ def generate_ifa_report():
     subprocess.run([sys.executable, IFA_SCRIPT])
 
 
-def move_ifa_report(session_dir, cycle):
+def move_ifa_report(session_dir, evaluation):
     src = os.path.join(BASE_DIR, "traces/IFA_Report_Filled.txt")
-    dst = os.path.join(session_dir, f"IFA_Report_{cycle}.txt")
+    dst = os.path.join(session_dir, f"IFA_Report_{evaluation}.txt")
     os.rename(src, dst)
     return dst
 
 
-def get_previous_code(session_dir, cycle):
-    if cycle <= 1:
+def get_previous_code(session_dir, evaluation):
+    if evaluation <= 1:
         return None
 
-    prev_file = os.path.join(session_dir, f"cc_cycle_{cycle-1}.c")
+    prev_file = os.path.join(session_dir, f"llm_cc_v_{evaluation-1}.c")
 
     if os.path.exists(prev_file):
         with open(prev_file) as f:
@@ -116,21 +116,30 @@ def get_previous_code(session_dir, cycle):
     return None
 
 
-def save_generated_code(session_dir, cycle, code):
-    code_path = os.path.join(session_dir, f"cc_cycle_{cycle}.c")
+def save_generated_code(session_dir, evaluation, code):
+    code_path = os.path.join(session_dir, f"llm_cc_v_{evaluation}.c")
     with open(code_path, "w") as f:
         f.write(code)
     return code_path
 
 
-def save_action(session_dir, cycle, action):
-    path = os.path.join(session_dir, f"action_{cycle}.json")
+def save_action(session_dir, evaluation, action):
+    path = os.path.join(session_dir, f"action_{evaluation}.json")
     with open(path, "w") as f:
         json.dump(action.model_dump(), f, indent=4)
     print(f"[Agent] Action saved → {path}")
 
 def escape_braces(text):
     return text.replace("{", "{{").replace("}", "}}")
+
+def check_termination_flag(session_id):
+    flag = os.path.join(RESULTS_DIR, f"{session_id}.terminated")
+
+    if os.path.exists(flag):
+        os.remove(flag)
+        return True
+
+    return False
 
 # ---------------------------------------------------------
 # LLM EXECUTION
@@ -139,7 +148,7 @@ def escape_braces(text):
 def run_llm(system_prompt, ifa_report, target_name, previous_code=None, current_code=None, compile_error=None):
     context = ifa_report
 
-    # FIRST ATTEMPT → use previous cycle code
+    # FIRST ATTEMPT → use previous evaluation code
     if previous_code and not current_code:
         context += f"""
             === PREVIOUS GENERATED CONGESTION CONTROL CODE ===
@@ -186,12 +195,16 @@ def run_llm(system_prompt, ifa_report, target_name, previous_code=None, current_
 # COMPILE WITH SELF-REPAIR
 # ---------------------------------------------------------
 
-def compile_with_self_repair(system_prompt, report, target_cc, session_dir, cycle, previous_code):
+def compile_with_self_repair(system_prompt, report, target_cc, session_dir, evaluation, previous_code, session_id):
     compile_error = None
     last_generated_code = None
+    result = None
 
     for attempt in range(3):
         print(f"[Agent] LLM attempt {attempt+1}")
+
+        if check_termination_flag(session_id):
+                break
 
         result = run_llm(
                     system_prompt,
@@ -207,12 +220,15 @@ def compile_with_self_repair(system_prompt, report, target_cc, session_dir, cycl
 
         if success:
             print("[Compiler] SUCCESS")
-            save_generated_code(session_dir, cycle, code)
+            save_generated_code(session_dir, evaluation, code)
             return result, True
 
         else:
             print("[Compiler] ERROR — requesting repair")
             compile_error = message
+
+        if check_termination_flag(session_id):
+                break
 
     return result, False
 
@@ -239,6 +255,7 @@ def main():
     system_prompt = open(SYSTEM_PROMPT_PATH).read()
 
     while True:
+        print("\n========== [Agent] Checking for new sessions...")
         session_id = detect_new_session(seen_sessions)
 
         if not session_id:
@@ -249,47 +266,77 @@ def main():
         session_dir = os.path.join(TRACES_DIR, session_id)
         os.makedirs(session_dir, exist_ok=True)
 
-        cycle = 1
+        evaluation = 1
 
-        print("[FlexNGIA] Waiting 60 seconds before first cycle")
-        time.sleep(60)
+        print("[FlexNGIA] Waiting 60 seconds before first evaluation")
+        terminated = False
+        for _ in range(60):
+            if check_termination_flag(session_id):
+                print(f"[FlexNGIA] Session {session_id} terminated")
+                terminated = True
+                break
+            time.sleep(1)
+
+        if terminated:
+            continue
 
         while True:
-            print(f"\n========== SESSION {session_id} | CYCLE {cycle} ==========")
-
+            print(f"\n========== SESSION {session_id} | EVALUATION {evaluation} ==========")
             current_cc = get_current_cc()
             print(f"[Agent] Current CC: {current_cc}")
 
             target_cc = get_next_version_name(current_cc)
+            if check_termination_flag(session_id):
+                print(f"[FlexNGIA] Session {session_id} terminated")
+                break
             print(f"[Agent] Target CC: {target_cc}")
 
-            print("[Agent] Generating IFA report")
             generate_ifa_report()
-            ifa_path = move_ifa_report(session_dir, cycle)
+            ifa_path = move_ifa_report(session_dir, evaluation)
+            print("[Agent] Receiving IFA report")
             report = open(ifa_path).read()
 
-            previous_code = get_previous_code(session_dir, cycle)
+            previous_code = get_previous_code(session_dir, evaluation)
+
+            if check_termination_flag(session_id):
+                print(f"[FlexNGIA] Session {session_id} terminated")
+                break
 
             print("[Agent] Running LLM reasoning")
             result, compiled = compile_with_self_repair(
-                system_prompt,
-                report,
-                target_cc,
-                session_dir,
-                cycle,
-                previous_code
-            )
+                system_prompt, 
+                report, 
+                target_cc, 
+                session_dir, 
+                evaluation, 
+                previous_code, 
+                session_id)
 
-            save_action(session_dir, cycle, result)
+            if result is None:
+                break
+
+            if check_termination_flag(session_id):
+                print(f"[FlexNGIA] Session {session_id} terminated")
+                break
+
+            save_action(session_dir, evaluation, result)
+
 
             if not compiled:
                 print("[Agent] Compilation failed after retries")
 
-            cycle += 1
+            evaluation += 1
 
             print("[Agent] Sleeping 60 seconds")
-            time.sleep(60)
-
+            terminated = False
+            for _ in range(60):
+                if check_termination_flag(session_id):
+                    print(f"[FlexNGIA] Session {session_id} terminated")
+                    terminated = True
+                    break
+                time.sleep(1)
+            if terminated:
+                break
 
 # ---------------------------------------------------------
 if __name__ == "__main__":

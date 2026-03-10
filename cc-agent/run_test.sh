@@ -27,7 +27,6 @@ done
 LOG_FILE="$RESULTS_DIR/$count.csv"
 echo "[*] New log file will be: $LOG_FILE"
 
-# --- ROBUST CLEANUP FUNCTION ---
 # This runs automatically when the script exits or is killed (Ctrl+C)
 cleanup() {
     echo ""
@@ -48,7 +47,7 @@ cleanup() {
     echo "[*] Done. Logs saved to $LOG_FILE"
 }
 
-# Register the trap: Run 'cleanup' on EXIT, Ctrl+C (SIGINT), or Kill (SIGTERM)
+# Run 'cleanup' on EXIT, Ctrl+C (SIGINT), or Kill (SIGTERM)
 trap cleanup EXIT INT TERM
 
 # -------------------------------
@@ -73,8 +72,12 @@ LOGGER_PID=$!
 # 6. Run the Mininet Topology
 echo "[*] Starting Topology. Press Ctrl+D in Mininet CLI to exit."
 echo "---------------------------------------------------------"
-python3 $TOPO_FILE
+python3 $TOPO_FILE 2>&1 | grep -v "sch_htb"
 echo "---------------------------------------------------------"
+
+# SIGNAL TERMINATION TO AGENT
+echo "[*] Signaling session termination..."
+touch "$RESULTS_DIR/$count.terminated"
 
 # --- GENERATE PLOTS AUTOMATICALLY ---
 echo "[*] Generating plots for $LOG_FILE..."
