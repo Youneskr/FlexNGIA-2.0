@@ -84,9 +84,19 @@ clean:
         if os.path.exists(DELEGATE_CC_PATH):
             with open(DELEGATE_CC_PATH, 'w') as f:
                 f.write(cc_name)
+
+            try:
+                subprocess.run(
+                    'echo "" >> ./clock.log && sudo ./clock.sh get >> ./clock.log',
+                    shell=True,
+                    check=False
+                )
+            except Exception as e:
+                print(f"[Clock] Logging failed: {e}")
+
             return True, f"Success: Module {cc_name} loaded and activated."
+
         else:
-            return False, f"Activation Error: {DELEGATE_CC_PATH} not found."
-        
+            return False, f"Activation Error: {DELEGATE_CC_PATH} not found."        
     except Exception as e:
         return False, f"Loading/Activation Error: {str(e)}"

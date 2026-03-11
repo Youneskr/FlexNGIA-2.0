@@ -12,15 +12,28 @@ RESULTS_DIR = os.path.join(
 )
 
 def get_latest_csv():
-    """Finds the most recently modified CSV file in results/"""
+    """Find the most recent results/<session>/<session>.csv file"""
+
     if not os.path.exists(RESULTS_DIR):
         return None
 
-    list_of_files = glob.glob(os.path.join(RESULTS_DIR, "*.csv"))
-    if not list_of_files:
+    csv_files = []
+
+    for d in os.listdir(RESULTS_DIR):
+        session_dir = os.path.join(RESULTS_DIR, d)
+
+        if not os.path.isdir(session_dir):
+            continue
+
+        csv_path = os.path.join(session_dir, f"{d}.csv")
+
+        if os.path.exists(csv_path):
+            csv_files.append(csv_path)
+
+    if not csv_files:
         return None
 
-    return max(list_of_files, key=os.path.getmtime)
+    return max(csv_files, key=os.path.getmtime)
 
 
 def main():
@@ -65,6 +78,13 @@ def main():
                     "min": float(round(df["RTT_MS"].min(), 2)),
                     "max": float(round(df["RTT_MS"].max(), 2)),
                     "current": float(df["RTT_MS"].iloc[-1])
+                },
+                "lost_segments": {
+                    "avg": float(round(df["RTX_TOT"].mean(), 2)),
+                    "std": float(round(df["RTX_TOT"].std(), 2)),
+                    "min": int(df["RTX_TOT"].min()),
+                    "max": int(df["RTX_TOT"].max()),
+                    "current": int(df["RTX_TOT"].iloc[-1])
                 }
             }
         }

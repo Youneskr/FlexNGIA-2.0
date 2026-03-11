@@ -77,25 +77,14 @@ def topology(args):
     ap1.start([c0])
     for switch in switches:
         switch.start([c0])
+        
+        
+    # Signal that topology is ready
+    open("/tmp/mininet_ready", "w").close()
+    info("*** Topology ready\n")
 
-    # --- AUTOMATION START ---
-    info("*** Starting TCP Traffic...\n")
-    
-    # 1. Start Server on h2 (Background)
-    # The '&' at the end is crucial so it doesn't block
-    h2.cmd('python3 mininet/h2-server.py > /tmp/server.log 2>&1 &')
-    
-    # 2. Start Client on h1 (Foreground)
-    # NO '&' here. We want the script to PAUSE here until the client finishes sending.
-    info("*** Client starting flood...\n")
-    h1.cmd('sleep 2 && python3 mininet/h1-client.py > /tmp/client.log 2>&1')
-    
-    info("*** Client finished.\n")
-    # ------------------------
-
-    # Stop the network
-    info("*** Stopping network\n")
-    net.stop()
+    while True:
+        time.sleep(1)
 
 if __name__ == '__main__':
     setLogLevel('info')

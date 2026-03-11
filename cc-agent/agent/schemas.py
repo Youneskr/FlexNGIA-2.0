@@ -9,5 +9,5 @@ class AgentOutput(BaseModel):
     step_5: str = Field(description="5. Identify missing traits (e.g., lack of delay sensitivity).")
     step_6: str = Field(description="6. Suggest specific behavioral improvements.")
     step_7: str = Field(description="7. Predict how a new algorithm will improve performance.")
-    justification: str = Field(description="Why this design will fix the identified weaknesses.")
+    step_8: str = Field(description="Why this design will fix the identified weaknesses.")
     c_code: str = Field(description="The complete, valid C code for the Linux Kernel module.")

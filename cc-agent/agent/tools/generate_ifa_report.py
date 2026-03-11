@@ -55,11 +55,14 @@ def build_context(metrics):
     cwnd = m["cwnd"]
     rate = m["rate_mbps"]
     rtt = m["rtt_ms"]
+    lost = m["lost_segments"]
 
     return {
         "cwnd": {**cwnd, "trend": detect_trend(cwnd["std"], cwnd["avg"])},
         "rate": {**rate, "trend": detect_trend(rate["std"], rate["avg"])},
-        "rtt": {**rtt, "trend": detect_trend(rtt["std"], rtt["avg"])}
+        "rtt": {**rtt, "trend": detect_trend(rtt["std"], rtt["avg"])},
+        "lost": {**lost, "trend": detect_trend(lost["std"], lost["avg"])}
+
     }
 
 

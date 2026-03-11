@@ -7,3 +7,6 @@ sysctl net.ipv4.tcp_available_congestion_control | tr " " "\n" | grep -oP "llm_c
     echo "Unloading llm_cc_v${id}..."
     sudo rmmod llm_cc_v${id} && echo "✓ llm_cc_v${id} unloaded" || echo "✗ Failed to unload llm_cc_v${id}"
 done
+
+sudo rm -rf agent/workspace
+mkdir -p agent/workspace

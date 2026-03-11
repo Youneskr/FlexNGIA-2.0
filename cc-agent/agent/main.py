@@ -61,21 +61,25 @@ def get_next_version_name(current_cc_name: str) -> str:
         return "llm_cc_v1"
 
 
-def detect_new_session(seen_sessions):
-    files = sorted(os.listdir(RESULTS_DIR))
+def detect_new_session():
+    clock_file = "CLOCK_START"
 
-    for f in files:
-        if not f.endswith(".csv"):
-            continue
+    if not os.path.exists(clock_file):
+        return None
 
-        session_id = f.replace(".csv", "")
+    # find latest directory in RESULTS_DIR
+    dirs = [
+        d for d in os.listdir(RESULTS_DIR)
+        if os.path.isdir(os.path.join(RESULTS_DIR, d))
+    ]
 
-        if session_id not in seen_sessions:
-            seen_sessions.add(session_id)
-            return session_id
+    if not dirs:
+        print("[Agent] No directories found in RESULTS_DIR")
+        return None
 
-    return None
+    latest = max(dirs, key=lambda x: int(x))
 
+    return latest
 
 def get_current_cc():
 
@@ -133,7 +137,7 @@ def escape_braces(text):
     return text.replace("{", "{{").replace("}", "}}")
 
 def check_termination_flag(session_id):
-    flag = os.path.join(RESULTS_DIR, f"{session_id}.terminated")
+    flag = os.path.join(RESULTS_DIR, session_id, "terminated")
 
     if os.path.exists(flag):
         os.remove(flag)
@@ -245,18 +249,11 @@ def main():
 
     os.makedirs(TRACES_DIR, exist_ok=True)
 
-    # Ignore pre-existing sessions
-    seen_sessions = {
-        f.replace(".csv", "")
-        for f in os.listdir(RESULTS_DIR)
-        if f.endswith(".csv")
-    }
-
     system_prompt = open(SYSTEM_PROMPT_PATH).read()
 
+    print("\n========== [Agent] Checking for new sessions...")
     while True:
-        print("\n========== [Agent] Checking for new sessions...")
-        session_id = detect_new_session(seen_sessions)
+        session_id = detect_new_session()
 
         if not session_id:
             time.sleep(5)
