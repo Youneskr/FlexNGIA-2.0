@@ -31,7 +31,7 @@ load_dotenv()
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
     groq_api_key=os.getenv("GROQ_API_KEY"),
-    temperature=0
+    temperature=0,
 )
 
 structured_llm = llm.with_structured_output(AgentOutput)
@@ -51,14 +51,14 @@ GET_CC_SCRIPT = os.path.join(BASE_DIR, "tools/get_current_cc.py")
 # UTILITIES
 # ---------------------------------------------------------
 
-def get_next_version_name(current_cc_name: str) -> str:
-    match = re.search(r'llm_cc_v(\d+)', current_cc_name)
+def get_next_version_name(current_cc_name: str, session_id: str) -> str:
+    match = re.search(rf"llm_cc_v{session_id}_(\d+)", current_cc_name)
 
     if match:
         version = int(match.group(1)) + 1
-        return f"llm_cc_v{version}"
+        return f"llm_cc_v{session_id}_{version}"
     else:
-        return "llm_cc_v1"
+        return f"llm_cc_v{session_id}_1"
 
 
 def detect_new_session():
@@ -107,11 +107,11 @@ def move_ifa_report(session_dir, evaluation):
     return dst
 
 
-def get_previous_code(session_dir, evaluation):
+def get_previous_code(session_dir, evaluation, session_id):
     if evaluation <= 1:
         return None
 
-    prev_file = os.path.join(session_dir, f"llm_cc_v_{evaluation-1}.c")
+    prev_file = os.path.join(session_dir, f"llm_cc_v{session_id}_{evaluation-1}.c")
 
     if os.path.exists(prev_file):
         with open(prev_file) as f:
@@ -120,8 +120,8 @@ def get_previous_code(session_dir, evaluation):
     return None
 
 
-def save_generated_code(session_dir, evaluation, code):
-    code_path = os.path.join(session_dir, f"llm_cc_v_{evaluation}.c")
+def save_generated_code(session_dir, evaluation, code, session_id):
+    code_path = os.path.join(session_dir, f"llm_cc_v{session_id}_{evaluation}.c")
     with open(code_path, "w") as f:
         f.write(code)
     return code_path
@@ -157,7 +157,7 @@ def run_llm(system_prompt, ifa_report, target_name, previous_code=None, current_
         context += f"""
             === PREVIOUS GENERATED CONGESTION CONTROL CODE ===
             ```c
-                {previous_code}
+                {escape_braces(previous_code)}
             ```
             You may refine or improve this algorithm if necessary.
         """
@@ -167,7 +167,7 @@ def run_llm(system_prompt, ifa_report, target_name, previous_code=None, current_
         context += f"""
             === CURRENT GENERATED CODE (FAILED TO COMPILE) ===
             ```c
-                {current_code}
+                {escape_braces(current_code)}
             ```
             The code above failed compilation. Fix it.
         """
@@ -178,9 +178,7 @@ def run_llm(system_prompt, ifa_report, target_name, previous_code=None, current_
         {compile_error}
         Fix the kernel code so it compiles successfully.
         """
-    
-    context = escape_braces(context)
-    
+
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
         ("user", context)
@@ -224,7 +222,7 @@ def compile_with_self_repair(system_prompt, report, target_cc, session_dir, eval
 
         if success:
             print("[Compiler] SUCCESS")
-            save_generated_code(session_dir, evaluation, code)
+            save_generated_code(session_dir, evaluation, code, session_id)
             return result, True
 
         else:
@@ -282,7 +280,7 @@ def main():
             current_cc = get_current_cc()
             print(f"[Agent] Current CC: {current_cc}")
 
-            target_cc = get_next_version_name(current_cc)
+            target_cc = get_next_version_name(current_cc, session_id)
             if check_termination_flag(session_id):
                 print(f"[FlexNGIA] Session {session_id} terminated")
                 break
@@ -293,7 +291,7 @@ def main():
             print("[Agent] Receiving IFA report")
             report = open(ifa_path).read()
 
-            previous_code = get_previous_code(session_dir, evaluation)
+            previous_code = get_previous_code(session_dir, evaluation, session_id)
 
             if check_termination_flag(session_id):
                 print(f"[FlexNGIA] Session {session_id} terminated")

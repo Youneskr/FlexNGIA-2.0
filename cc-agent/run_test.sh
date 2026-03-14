@@ -72,6 +72,10 @@ cleanup() {
     # Remove topology ready file
     rm -f "$READY_FILE"
 
+    ./clock.sh clear > /dev/null 2>&1
+
+    ./reset_cc.sh > /dev/null 2>&1
+
     # Clean Mininet
     mn -c > /dev/null 2>&1 || true
 
@@ -204,10 +208,10 @@ python3 helpers/loss_analysis.py "$RUN_DIR"
 # -------------------------------------------------
 
 echo "[*] Generating plots..." 
-python3 analysis/plot_results.py "$LOG_FILE" 
-
-
 python3 helpers/generate_cc_periods.py "clock.log" "$RUN_DIR/cc_periods" 
+
+python3 analysis/plot_results.py "$RUN_DIR" 
+
 
 rm -f "clock.log"
 

@@ -76,3 +76,9 @@ MODULE_AUTHOR("FlexNGIA Agent");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("LLM Generated CC");
 ```
+
+The congestion control algorithm name MUST be exactly {target_name}.
+Use it in:
+
+.name = "{target_name}"
+

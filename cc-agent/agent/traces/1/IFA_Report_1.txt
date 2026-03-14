@@ -18,10 +18,10 @@
 - Mobility Context: Stationary
 
 # Observed QoS Metrics (Multi-layer QoS Measurement Agent)
-- CWND: (μ=160.94, σ=32.87) ⬊, range=[10–275]
-- RTT: (μ=129.45 ms, σ=2.66) ⬌, range=[127.0–274.0] ms
-- Throughput: (μ=13.75 Mbps, σ=11.21) ⬈, range=[0.0–1782.0] Mbps
-- Lost Segments: (μ=61.41, σ=8.17) ⬊, range=[0–72]
+- CWND: (μ=156.73, σ=35.78) ⬊, range=[10–345]
+- RTT: (μ=129.41 ms, σ=2.68) ⬌, range=[127.0–275.0] ms
+- Throughput: (μ=13.41 Mbps, σ=18.2) ⬈, range=[0.0–3159.0] Mbps
+- Lost Segments: (μ=98.21, σ=10.49) ⬊, range=[0–102]
 
 # User-Perceived Quality (QoE Measurement Agent)
 - AI-Predicted QoE Score: 0.63/1

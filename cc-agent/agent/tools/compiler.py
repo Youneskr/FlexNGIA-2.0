@@ -68,7 +68,7 @@ clean:
 
         # Remove if it exists (reload)
         lsmod_out = subprocess.run(['lsmod'], capture_output=True, text=True).stdout
-        if cc_name in lsmod_out:
+        if any(line.startswith(cc_name) for line in lsmod_out.splitlines()):
             subprocess.run(['rmmod', cc_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
         result = subprocess.run(
