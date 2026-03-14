@@ -1,4 +1,4 @@
-obj-m += llm_wifi.o
+obj-m += llm_cc_wifi.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(CURDIR) modules

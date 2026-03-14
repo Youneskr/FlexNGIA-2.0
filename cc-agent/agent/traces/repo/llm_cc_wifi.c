@@ -6,7 +6,7 @@
 
 /* FlexNGIA-LLM Generated Logic */
 
-static u32 llm_wifi_ssthresh(struct sock *sk)
+static u32 llm_cc_wifi_ssthresh(struct sock *sk)
 {
     const struct tcp_sock *tp = tcp_sk(sk);
     
@@ -16,42 +16,45 @@ static u32 llm_wifi_ssthresh(struct sock *sk)
     return max_t(u32, tp->snd_cwnd >> 1, 2U * tp->mss_cache);
 }
 
-static void llm_wifi_cong_avoid(struct sock *sk, u32 ack, u32 acked)
+static void llm_cc_wifi_cong_avoid(struct sock *sk, u32 ack, u32 acked)
 {
     struct tcp_sock *tp = tcp_sk(sk);
     
     /* >>> IMPLEMENTATION HERE <<< */
     /* Implement the Congestion Avoidance logic based on the design. */
     /* Use: tcp_slow_start(tp, acked) and tcp_cong_avoid_ai(tp, tp->snd_cwnd, acked) */
+    tcp_cong_avoid_ai(tp, tp->snd_cwnd, acked);
+    if (tp->snd_cwnd < tp->snd_ssthresh)
+        tcp_slow_start(tp, acked);
 }
 
-static u32 llm_wifi_undo_cwnd(struct sock *sk)
+static u32 llm_cc_wifi_undo_cwnd(struct sock *sk)
 {
     const struct tcp_sock *tp = tcp_sk(sk);
     /* >>> IMPLEMENTATION HERE <<< */
     return tp->snd_cwnd;
 }
 
-static struct tcp_congestion_ops llm_wifi __read_mostly = {
-    .name       = "llm_wifi",
+static struct tcp_congestion_ops llm_cc_wifi __read_mostly = {
+    .name       = "llm_cc_wifi",
     .owner      = THIS_MODULE,
-    .ssthresh   = llm_wifi_ssthresh,
-    .cong_avoid = llm_wifi_cong_avoid,
-    .undo_cwnd  = llm_wifi_undo_cwnd,
+    .ssthresh   = llm_cc_wifi_ssthresh,
+    .cong_avoid = llm_cc_wifi_cong_avoid,
+    .undo_cwnd  = llm_cc_wifi_undo_cwnd,
 };
 
-static int __init llm_wifi_register(void)
+static int __init llm_cc_wifi_register(void)
 {
-    return tcp_register_congestion_control(&llm_wifi);
+    return tcp_register_congestion_control(&llm_cc_wifi);
 }
 
-static void __exit llm_wifi_unregister(void)
+static void __exit llm_cc_wifi_unregister(void)
 {
-    tcp_unregister_congestion_control(&llm_wifi);
+    tcp_unregister_congestion_control(&llm_cc_wifi);
 }
 
-module_init(llm_wifi_register);
-module_exit(llm_wifi_unregister);
+module_init(llm_cc_wifi_register);
+module_exit(llm_cc_wifi_unregister);
 
 MODULE_AUTHOR("FlexNGIA Agent");
 MODULE_LICENSE("GPL");
