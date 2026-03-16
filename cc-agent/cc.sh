@@ -59,9 +59,8 @@ is_kernel_loaded() {
 # Returns 0 if $1 is a Linux built-in (present in sysctl, not in repo/)
 is_builtin() {
     local name="$1"
-    # If there is a .ko or .c for it in repo/ it is LLM-managed, not built-in
+    # A .ko in repo/ is the authoritative LLM signal; .c alone is not enough
     [ -f "$REPO_DIR/$name.ko" ] && return 1
-    [ -f "$REPO_DIR/$name.c"  ] && return 1
     sysctl -n net.ipv4.tcp_available_congestion_control \
         | grep -qw "$name"
 }
@@ -111,11 +110,10 @@ list_one_line() {
     declare -A seen
     result=()
 
-    # Include all repo entries: .c files cover both compiled and renamed-only
-    for src in "$REPO_DIR"/*.c; do
-        [ -e "$src" ] || continue
-        name=$(basename "$src" .c)
-        [[ "$name" == *.mod ]] && continue
+    # Repo entries: only .ko files — presence of .ko means the module is known
+    for ko in "$REPO_DIR"/*.ko; do
+        [ -e "$ko" ] || continue
+        name=$(basename "$ko" .ko)
         [[ "$name" == "proxy" ]] && continue
         if [[ -z "${seen[$name]}" ]]; then
             seen["$name"]=1
@@ -168,8 +166,9 @@ list_cc() {
 
         [[ "$cc" == "proxy" ]] && continue
 
-        # Only show here if not LLM-managed (no .c in repo/ or traces/)
-        [ -f "$REPO_DIR/$cc.c" ] && continue
+        # Only show here if not LLM-managed
+        # A .ko in repo/ is the authoritative signal — ignore .c alone
+        [ -f "$REPO_DIR/$cc.ko" ] && continue
         found=$(find "$TRACES_DIR" -not -path "$REPO_DIR/*" \
                     -type f -name "$cc.c" ! -name "*.mod.c" 2>/dev/null | head -n1)
         [ -n "$found" ] && continue
@@ -184,7 +183,27 @@ list_cc() {
     done
 
     # ----------------------------------------------------------
-    # LLM modules: .c in repo/ (compiled or renamed-only)
+    # LLM modules: .ko in repo/ — presence of .ko means loaded=yes
+    # (we do not iterate .c files here; a .c without a .ko is not yet compiled)
+    # ----------------------------------------------------------
+
+    for ko in "$REPO_DIR"/*.ko; do
+
+        [ -e "$ko" ] || continue
+        name=$(basename "$ko" .ko)
+        [[ "$name" == *.mod ]] && continue
+        SHOWN["$name"]=1
+
+        marker=""
+        [ "$name" == "$active_cc" ] && marker="*"
+
+        printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
+            "$name" "no" "yes" "-" "$marker"
+
+    done
+
+    # ----------------------------------------------------------
+    # LLM modules: .c in repo/ but no .ko yet (renamed, not compiled)
     # ----------------------------------------------------------
 
     for src in "$REPO_DIR"/*.c; do
@@ -192,15 +211,14 @@ list_cc() {
         [ -e "$src" ] || continue
         name=$(basename "$src" .c)
         [[ "$name" == *.mod ]] && continue
+        [ -n "${SHOWN[$name]}" ] && continue   # already shown via .ko
         SHOWN["$name"]=1
 
-        loaded="no"
-        [[ -n "${KERNEL_SET[$name]}" ]] && loaded="yes"
         marker=""
         [ "$name" == "$active_cc" ] && marker="*"
 
         printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
-            "$name" "no" "$loaded" "-" "$marker"
+            "$name" "no" "no" "-" "$marker"
 
     done
 
