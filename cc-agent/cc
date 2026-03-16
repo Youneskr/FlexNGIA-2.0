@@ -23,7 +23,7 @@
 #       Rename a module (copies to repo, renames internals, original untouched)
 #
 #   cc -u <cc>
-#       Unload LLM congestion control module (rmmod + remove repo files)
+#       Unload LLM congestion control module (rmmod + remove compiled files, keep .c)
 #
 #   cc -l
 #       Print all available CC in one space-separated line
@@ -178,7 +178,7 @@ list_cc() {
             "$name" "no" "yes" "-" "$marker"
     done
 
-    # LLM: .c in repo/ but no .ko yet (renamed, not compiled)
+    # LLM: .c in repo/ but no .ko yet (renamed or unloaded)
     for src in "$REPO_DIR"/*.c; do
         [ -e "$src" ] || continue
         name=$(basename "$src" .c)
@@ -404,6 +404,8 @@ rename_cc() {
 
 # ----------------------------------------------------------
 # Unload LLM congestion control module (-u)
+# Removes from kernel and deletes compiled artifacts.
+# Keeps the .c source file so the module can be reloaded with -s.
 # ----------------------------------------------------------
 
 unload_cc() {
@@ -439,13 +441,12 @@ unload_cc() {
         echo "Module '$CC_NAME' is not currently loaded in kernel (skipping rmmod)."
     fi
 
-    echo "Removing repo files for '$CC_NAME'..."
+    echo "Removing compiled artifacts for '$CC_NAME' (keeping .c)..."
 
-    # Use explicit extensions — never an open wildcard like name* which
-    # would also match names that start with the same prefix (e.g.
-    # unloading 'wifi' must not delete 'wifi2.c')
+    # Explicit extensions only — .c is intentionally excluded so the source
+    # is preserved and the module can be reloaded with: sudo cc -s <name>
     removed=0
-    for ext in .c .ko .o .mod .mod.c .mod.o; do
+    for ext in .ko .o .mod .mod.c .mod.o; do
         f="$REPO_DIR/$CC_NAME$ext"
         if [ -e "$f" ]; then
             echo "  Removing: $f"
@@ -461,9 +462,9 @@ unload_cc() {
             removed=1
         fi
     done
-    [ "$removed" -eq 0 ] && echo "No repo files found for '$CC_NAME'."
+    [ "$removed" -eq 0 ] && echo "No compiled files found for '$CC_NAME'."
 
-    echo "Done. '$CC_NAME' has been fully unloaded and removed."
+    echo "Done. '$CC_NAME' unloaded — source kept at $REPO_DIR/$CC_NAME.c"
 }
 
 
