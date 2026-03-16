@@ -441,17 +441,27 @@ unload_cc() {
 
     echo "Removing repo files for '$CC_NAME'..."
 
-    shopt -s nullglob
-    repo_files=( "$REPO_DIR/$CC_NAME"* "$REPO_DIR/.$CC_NAME"* )
-    if [ ${#repo_files[@]} -eq 0 ]; then
-        echo "No repo files found for '$CC_NAME'."
-    else
-        for f in "${repo_files[@]}"; do
+    # Use explicit extensions — never an open wildcard like name* which
+    # would also match names that start with the same prefix (e.g.
+    # unloading 'wifi' must not delete 'wifi2.c')
+    removed=0
+    for ext in .c .ko .o .mod .mod.c .mod.o; do
+        f="$REPO_DIR/$CC_NAME$ext"
+        if [ -e "$f" ]; then
             echo "  Removing: $f"
             rm -f "$f"
-        done
-    fi
-    shopt -u nullglob
+            removed=1
+        fi
+    done
+    for ext in .ko.cmd .o.cmd .mod.cmd .mod.o.cmd; do
+        f="$REPO_DIR/.$CC_NAME$ext"
+        if [ -e "$f" ]; then
+            echo "  Removing: $f"
+            rm -f "$f"
+            removed=1
+        fi
+    done
+    [ "$removed" -eq 0 ] && echo "No repo files found for '$CC_NAME'."
 
     echo "Done. '$CC_NAME' has been fully unloaded and removed."
 }
