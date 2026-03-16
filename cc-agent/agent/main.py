@@ -52,13 +52,13 @@ GET_CC_SCRIPT = os.path.join(BASE_DIR, "tools/get_current_cc.py")
 # ---------------------------------------------------------
 
 def get_next_version_name(current_cc_name: str, session_id: str) -> str:
-    match = re.search(rf"llm_cc_v{session_id}_(\d+)", current_cc_name)
+    match = re.search(rf"llm_cc_{session_id}_(\d+)", current_cc_name)
 
     if match:
         version = int(match.group(1)) + 1
-        return f"llm_cc_v{session_id}_{version}"
+        return f"llm_cc_{session_id}_{version}"
     else:
-        return f"llm_cc_v{session_id}_1"
+        return f"llm_cc_{session_id}_1"
 
 
 def detect_new_session():
@@ -111,7 +111,7 @@ def get_previous_code(session_dir, evaluation, session_id):
     if evaluation <= 1:
         return None
 
-    prev_file = os.path.join(session_dir, f"llm_cc_v{session_id}_{evaluation-1}.c")
+    prev_file = os.path.join(session_dir, f"llm_cc_{session_id}_{evaluation-1}.c")
 
     if os.path.exists(prev_file):
         with open(prev_file) as f:
@@ -121,7 +121,7 @@ def get_previous_code(session_dir, evaluation, session_id):
 
 
 def save_generated_code(session_dir, evaluation, code, session_id):
-    code_path = os.path.join(session_dir, f"llm_cc_v{session_id}_{evaluation}.c")
+    code_path = os.path.join(session_dir, f"llm_cc_{session_id}_{evaluation}.c")
     with open(code_path, "w") as f:
         f.write(code)
     return code_path

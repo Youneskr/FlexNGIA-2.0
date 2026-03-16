@@ -9,20 +9,25 @@
 #   ./cc.sh
 #       Show current active congestion control
 #
-#   ./cc.sh -l
+#   ./cc.sh -ls
 #       List congestion control modules
 #
 #   ./cc.sh -s <cc>
-#       Load congestion control module
+#       Load congestion control module — if source is from traces/, prompts
+#       for a rename before copying to repo/, compiling, and loading
 #
 #   ./cc.sh -a <cc>
 #       Activate congestion control
 #
-#   ./cc.sh -u <cc>
-#       Unload LLM congestion control module (rmmod + remove repo files + clean registry)
+#   ./cc.sh -r <old> <new>
+#       Rename a module (unloads if needed, copies to repo, renames internals)
 #
-#   ./cc.sh -c
-#       Print all loaded LLM CC modules in one space-separated line
+#   ./cc.sh -u <cc>
+#       Unload LLM congestion control module (rmmod + remove repo files)
+#
+#   ./cc.sh -l
+#       Print all available CC in one space-separated line
+#       (union of repo/*.ko names and sysctl list, proxy excluded)
 #
 # ==========================================================
 
@@ -37,39 +42,54 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 TRACES_DIR="$SCRIPT_DIR/agent/traces"
 REPO_DIR="$TRACES_DIR/repo"
-LOADED_FILE="$TRACES_DIR/.loaded_cc"
 
 mkdir -p "$REPO_DIR"
 
-[ -f "$LOADED_FILE" ] || touch "$LOADED_FILE"
-
 
 # ----------------------------------------------------------
-# Load mapping file
+# Helpers
 # ----------------------------------------------------------
 
-load_mapping() {
+# Returns 0 if $1 is currently loaded in the kernel
+is_kernel_loaded() {
+    sysctl -n net.ipv4.tcp_available_congestion_control \
+        | grep -qw "$1"
+}
 
-    declare -gA MAP_OLD_NEW
-    declare -gA MAP_NEW_OLD
+# Returns 0 if $1 is a Linux built-in (present in sysctl, not in repo/)
+is_builtin() {
+    local name="$1"
+    # If there is a .ko or .c for it in repo/ it is LLM-managed, not built-in
+    [ -f "$REPO_DIR/$name.ko" ] && return 1
+    [ -f "$REPO_DIR/$name.c"  ] && return 1
+    sysctl -n net.ipv4.tcp_available_congestion_control \
+        | grep -qw "$name"
+}
 
-    while read -r old new; do
-        [ -z "$old" ] && continue
-        MAP_OLD_NEW["$old"]="$new"
-        MAP_NEW_OLD["$new"]="$old"
-    done < "$LOADED_FILE"
+# Returns 0 if $1 is LLM-managed:
+# has a .c anywhere under traces/ (including repo/) OR a .ko in repo/
+is_llm() {
+    local name="$1"
+    [ -f "$REPO_DIR/$name.ko" ] && return 0
+    find "$TRACES_DIR" -type f -name "$name.c" ! -name "*.mod.c" \
+        -not -path "$REPO_DIR/*.mod.c" \
+        | grep -q . && return 0
+    return 1
+}
 
+get_active_cc() {
+    tr -d '[:space:]' < "$CC_PATH" 2>/dev/null
 }
 
 
 # ----------------------------------------------------------
-# Show active CC
+# Show active CC (default, no args)
 # ----------------------------------------------------------
 
 show_current_cc() {
 
     if [ -f "$CC_PATH" ]; then
-        current_cc=$(tr -d '[:space:]' < "$CC_PATH")
+        current_cc=$(get_active_cc)
         if [ -z "$current_cc" ]; then
             echo "No congestion control is currently active."
         else
@@ -83,19 +103,19 @@ show_current_cc() {
 
 
 # ----------------------------------------------------------
-# Print all CC modules in one space-separated line:
-# union of repo/*.ko names and sysctl list, deduplicated, proxy excluded.
+# Print union of repo/*.ko + sysctl, deduplicated, proxy excluded
 # ----------------------------------------------------------
 
-get_loaded_llm_cc() {
+list_one_line() {
 
     declare -A seen
     result=()
 
-    # Add all .ko names from repo/
-    for ko in "$REPO_DIR"/*.ko; do
-        [ -e "$ko" ] || continue
-        name=$(basename "$ko" .ko)
+    # Include all repo entries: .c files cover both compiled and renamed-only
+    for src in "$REPO_DIR"/*.c; do
+        [ -e "$src" ] || continue
+        name=$(basename "$src" .c)
+        [[ "$name" == *.mod ]] && continue
         [[ "$name" == "proxy" ]] && continue
         if [[ -z "${seen[$name]}" ]]; then
             seen["$name"]=1
@@ -103,86 +123,100 @@ get_loaded_llm_cc() {
         fi
     done
 
-    # Add sysctl entries not already in the list
-    available_cc=$(sysctl -n net.ipv4.tcp_available_congestion_control)
-    read -ra kernel_cc <<< "$available_cc"
-
-    for k in "${kernel_cc[@]}"; do
+    while read -r k; do
         [[ "$k" == "proxy" ]] && continue
         if [[ -z "${seen[$k]}" ]]; then
             seen["$k"]=1
             result+=("$k")
         fi
-    done
+    done < <(sysctl -n net.ipv4.tcp_available_congestion_control \
+                 | tr ' ' '\n')
 
     echo "${result[*]}"
 }
 
 
 # ----------------------------------------------------------
-# List congestion controls
+# List congestion controls (-ls)
 # ----------------------------------------------------------
 
 list_cc() {
 
-    load_mapping
-
-    active_cc=$(tr -d '[:space:]' < "$CC_PATH" 2>/dev/null)
+    active_cc=$(get_active_cc)
 
     available_cc=$(sysctl -n net.ipv4.tcp_available_congestion_control)
     read -ra kernel_cc <<< "$available_cc"
 
-    declare -A LLM_MODULES
+    declare -A KERNEL_SET
+    for k in "${kernel_cc[@]}"; do
+        KERNEL_SET["$k"]=1
+    done
 
     echo ""
-    echo "=============================="
-    echo "        LLM-Based CC"
-    echo "=============================="
+    printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
+        "CC name" "built-in" "loaded" "description" "active"
+    printf "%-20s-+-%-8s-+-%-7s-+-%-12s-+-%-6s\n" \
+        "--------------------" "--------" "-------" "-----------" "------"
 
-    printf "%-20s | %-20s | %-7s | %-12s | %-6s\n" \
-        "CC name" "old name" "loaded" "description" "active"
+    declare -A SHOWN
 
-    printf "%-20s-+-%-20s-+-%-7s-+-%-12s-+-%-6s\n" \
-        "--------------------" "--------------------" "-------" "-----------" "------"
+    # ----------------------------------------------------------
+    # Built-in CC first (from sysctl, not in repo/)
+    # ----------------------------------------------------------
 
-    for ko in "$REPO_DIR"/*.ko; do
+    for cc in "${kernel_cc[@]}"; do
 
-        [ -e "$ko" ] || continue
+        [[ "$cc" == "proxy" ]] && continue
 
-        new=$(basename "$ko" .ko)
+        # Only show here if not LLM-managed (no .c in repo/ or traces/)
+        [ -f "$REPO_DIR/$cc.c" ] && continue
+        found=$(find "$TRACES_DIR" -not -path "$REPO_DIR/*" \
+                    -type f -name "$cc.c" ! -name "*.mod.c" 2>/dev/null | head -n1)
+        [ -n "$found" ] && continue
 
-        old="${MAP_NEW_OLD[$new]}"
-        [ -z "$old" ] && old="-"
-
-        LLM_MODULES["$new"]=1
-        [ "$old" != "-" ] && LLM_MODULES["$old"]=1
-
-        loaded="no"
-        for k in "${kernel_cc[@]}"; do
-            if [ "$k" == "$new" ]; then
-                loaded="yes"
-                break
-            fi
-        done
-
+        SHOWN["$cc"]=1
         marker=""
-        [ "$new" == "$active_cc" ] && marker="*"
+        [ "$cc" == "$active_cc" ] && marker="*"
 
-        printf "%-20s | %-20s | %-7s | %-12s | %-6s\n" \
-            "$new" "$old" "$loaded" "-" "$marker"
+        printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
+            "$cc" "yes" "yes" "-" "$marker"
 
     done
+
+    # ----------------------------------------------------------
+    # LLM modules: .c in repo/ (compiled or renamed-only)
+    # ----------------------------------------------------------
+
+    for src in "$REPO_DIR"/*.c; do
+
+        [ -e "$src" ] || continue
+        name=$(basename "$src" .c)
+        [[ "$name" == *.mod ]] && continue
+        SHOWN["$name"]=1
+
+        loaded="no"
+        [[ -n "${KERNEL_SET[$name]}" ]] && loaded="yes"
+        marker=""
+        [ "$name" == "$active_cc" ] && marker="*"
+
+        printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
+            "$name" "no" "$loaded" "-" "$marker"
+
+    done
+
+    # ----------------------------------------------------------
+    # LLM modules: .c only in traces/ subdirs (not yet in repo/)
+    # ----------------------------------------------------------
 
     while IFS= read -r f; do
 
         name=$(basename "$f" .c)
-
         [[ "$name" == *.mod ]] && continue
-        [[ -n "${MAP_OLD_NEW[$name]}" ]] && continue
-        [ -e "$REPO_DIR/$name.ko" ] && continue
+        [ -n "${SHOWN[$name]}" ] && continue
+        SHOWN["$name"]=1
 
-        printf "%-20s | %-20s | %-7s | %-12s | %-6s\n" \
-            "$name" "-" "no" "-" ""
+        printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
+            "$name" "no" "no" "-" ""
 
     done < <(find "$TRACES_DIR" \
                   -not -path "$REPO_DIR/*" \
@@ -190,38 +224,13 @@ list_cc() {
                   -name "*.c" \
                   ! -name "*.mod.c" \
                   2>/dev/null)
-
-    echo ""
-    echo "=============================="
-    echo "      Linux Built-in CC"
-    echo "=============================="
-
-    printf "%-20s | %-20s | %-7s | %-12s | %-6s\n" \
-        "CC name" "old name" "loaded" "description" "active"
-
-    printf "%-20s-+-%-20s-+-%-7s-+-%-12s-+-%-6s\n" \
-        "--------------------" "--------------------" "-------" "-----------" "------"
-
-    for cc in "${kernel_cc[@]}"; do
-
-        [[ "$cc" == "proxy" ]] && continue
-
-        if [[ -n "${LLM_MODULES[$cc]}" ]]; then
-            continue
-        fi
-
-        marker=""
-        [ "$cc" == "$active_cc" ] && marker="*"
-
-        printf "%-20s | %-20s | %-7s | %-12s | %-6s\n" \
-            "$cc" "-" "yes" "-" "$marker"
-
-    done
 }
 
 
 # ----------------------------------------------------------
-# Load congestion control module
+# Load congestion control module (-s)
+# Compile from traces/ if not yet in repo/, then insmod.
+# No rename prompt — use -r to rename.
 # ----------------------------------------------------------
 
 load_cc() {
@@ -233,61 +242,68 @@ load_cc() {
         exit 1
     fi
 
-    AVAILABLE=$(sysctl -n net.ipv4.tcp_available_congestion_control)
-
-    if echo "$AVAILABLE" | grep -qw "$CC_NAME"; then
+    # Already loaded in kernel
+    if is_kernel_loaded "$CC_NAME"; then
         echo "Module $CC_NAME already loaded."
         return
     fi
 
+    # Already compiled in repo/ — just insmod
     if [ -f "$REPO_DIR/$CC_NAME.ko" ]; then
-
         echo "Loading promoted module..."
-
         sudo insmod "$REPO_DIR/$CC_NAME.ko"
-
+        echo "Module loaded: $CC_NAME"
         return
     fi
 
-    SRC=$(find "$TRACES_DIR" \
-               -not -path "$REPO_DIR/*" \
-               -type f \
-               -name "$CC_NAME.c" \
-               | head -n1)
+    # Source already in repo/ (renamed but not yet compiled) — compile and load
+    if [ -f "$REPO_DIR/$CC_NAME.c" ]; then
+        SRC="$REPO_DIR/$CC_NAME.c"
+        FROM_TRACES=0
+    else
+        # Source is in traces/ — require rename before loading
+        SRC=$(find "$TRACES_DIR" \
+                   -not -path "$REPO_DIR/*" \
+                   -type f \
+                   -name "$CC_NAME.c" \
+                   ! -name "*.mod.c" \
+                   | head -n1)
+        FROM_TRACES=1
+    fi
 
     if [ -z "$SRC" ]; then
-        echo "Error: $CC_NAME.c not found."
+        echo "Error: $CC_NAME.c not found in traces or repo."
         exit 1
     fi
 
-    echo "Promoting module..."
-
-    ORIG_DIR="$(pwd)"
-
-    cp "$SRC" "$REPO_DIR/"
-
-    cd "$REPO_DIR" || exit 1
-
-    OLD_NAME="$CC_NAME"
-    NEW_NAME="$CC_NAME"
-
-    echo "Rename module before compilation? [y/N]"
-    read -r ans
-
-    if [[ "$ans" == "y" || "$ans" == "Y" ]]; then
-
-        echo "Enter new name:"
+    # Modules coming from traces/ must be renamed first
+    if [ "$FROM_TRACES" -eq 1 ]; then
+        echo "Module '$CC_NAME' is from traces/ and must be renamed before loading."
+        echo "Enter new name (or press Enter to keep '$CC_NAME'):"
         read -r NEW_NAME
+        NEW_NAME="${NEW_NAME:-$CC_NAME}"
 
-        sed -i "s/$OLD_NAME/$NEW_NAME/g" "$OLD_NAME.c"
-
-        mv "$OLD_NAME.c" "$NEW_NAME.c"
-
-        echo "$OLD_NAME $NEW_NAME" >> "$LOADED_FILE"
-
+        if [ "$NEW_NAME" != "$CC_NAME" ]; then
+            # Refuse if new name already exists in repo/
+            if [ -f "$REPO_DIR/$NEW_NAME.c" ] || [ -f "$REPO_DIR/$NEW_NAME.ko" ]; then
+                echo "Error: '$NEW_NAME' already exists in repo/. Choose a different name."
+                exit 1
+            fi
+            echo "Creating renamed copy '$CC_NAME' -> '$NEW_NAME' in repo/..."
+            cp "$SRC" "$REPO_DIR/$NEW_NAME.c"
+            sed -i "s/\b${CC_NAME}\b/${NEW_NAME}/g" "$REPO_DIR/$NEW_NAME.c"
+            echo "Original untouched: $SRC"
+            CC_NAME="$NEW_NAME"
+        else
+            # No rename — just copy to repo/ as-is
+            cp "$SRC" "$REPO_DIR/$CC_NAME.c"
+        fi
     fi
 
-    CC_NAME="$NEW_NAME"
+    echo "Promoting module $CC_NAME..."
+
+    ORIG_DIR="$(pwd)"
+    cd "$REPO_DIR" || exit 1
 
 cat > Makefile <<EOF
 obj-m += ${CC_NAME}.o
@@ -321,7 +337,7 @@ EOF
 
 
 # ----------------------------------------------------------
-# Activate congestion control
+# Activate congestion control (-a)
 # ----------------------------------------------------------
 
 activate_cc() {
@@ -333,9 +349,7 @@ activate_cc() {
         exit 1
     fi
 
-    AVAILABLE=$(sysctl -n net.ipv4.tcp_available_congestion_control)
-
-    if ! echo "$AVAILABLE" | grep -qw "$CC_NAME"; then
+    if ! is_kernel_loaded "$CC_NAME"; then
 
         if [ -f "$REPO_DIR/$CC_NAME.ko" ]; then
 
@@ -343,9 +357,7 @@ activate_cc() {
 
             sudo insmod "$REPO_DIR/$CC_NAME.ko"
 
-            AVAILABLE=$(sysctl -n net.ipv4.tcp_available_congestion_control)
-
-            if ! echo "$AVAILABLE" | grep -qw "$CC_NAME"; then
+            if ! is_kernel_loaded "$CC_NAME"; then
                 echo "Error: insmod succeeded but $CC_NAME still not visible in kernel."
                 exit 1
             fi
@@ -364,13 +376,77 @@ activate_cc() {
     fi
 
     echo "$CC_NAME" | sudo tee "$CC_PATH" > /dev/null
-
     echo "Activated congestion control: $CC_NAME"
 }
 
 
 # ----------------------------------------------------------
-# Unload LLM congestion control module
+# Rename a module (-r <old> <new>)
+#
+# Always creates a new independent copy in repo/ with the new name,
+# replacing all occurrences of the old name inside the code.
+# The original is NEVER touched, NEVER unloaded, NEVER moved.
+# ----------------------------------------------------------
+
+rename_cc() {
+
+    OLD_NAME="$1"
+    NEW_NAME="$2"
+
+    if [ -z "$OLD_NAME" ] || [ -z "$NEW_NAME" ]; then
+        echo "Error: Usage: ./cc.sh -r <old_name> <new_name>"
+        exit 1
+    fi
+
+    if [ "$OLD_NAME" == "$NEW_NAME" ]; then
+        echo "Error: Old and new names are identical."
+        exit 1
+    fi
+
+    # Refuse to rename a Linux built-in
+    if is_builtin "$OLD_NAME"; then
+        echo "Error: '$OLD_NAME' is a Linux built-in module and cannot be renamed."
+        exit 1
+    fi
+
+    # Refuse if new name already exists in repo/
+    if [ -f "$REPO_DIR/$NEW_NAME.c" ] || [ -f "$REPO_DIR/$NEW_NAME.ko" ]; then
+        echo "Error: '$NEW_NAME' already exists in repo/. Choose a different name."
+        exit 1
+    fi
+
+    # Find the source: check repo/ first, then traces/ subdirs
+    SRC=""
+    [ -f "$REPO_DIR/$OLD_NAME.c" ] && SRC="$REPO_DIR/$OLD_NAME.c"
+
+    if [ -z "$SRC" ]; then
+        SRC=$(find "$TRACES_DIR" \
+                   -not -path "$REPO_DIR/*" \
+                   -type f \
+                   -name "$OLD_NAME.c" \
+                   ! -name "*.mod.c" \
+                   | head -n1)
+    fi
+
+    if [ -z "$SRC" ]; then
+        echo "Error: Source file for '$OLD_NAME' not found."
+        exit 1
+    fi
+
+    echo "Creating renamed copy '$OLD_NAME' -> '$NEW_NAME' in repo/..."
+
+    cp "$SRC" "$REPO_DIR/$NEW_NAME.c"
+    sed -i "s/\b${OLD_NAME}\b/${NEW_NAME}/g" "$REPO_DIR/$NEW_NAME.c"
+
+    echo "Renamed copy stored at: $REPO_DIR/$NEW_NAME.c"
+    echo "Original untouched: $SRC"
+    echo "Done. '$NEW_NAME' is ready — use './cc.sh -s $NEW_NAME' to load it."
+}
+
+
+
+# ----------------------------------------------------------
+# Unload LLM congestion control module (-u)
 # ----------------------------------------------------------
 
 unload_cc() {
@@ -382,30 +458,22 @@ unload_cc() {
         exit 1
     fi
 
-    load_mapping
-
-    is_llm=0
-    [ -f "$REPO_DIR/$CC_NAME.ko" ]    && is_llm=1
-    [ -n "${MAP_NEW_OLD[$CC_NAME]}" ]  && is_llm=1
-    [ -n "${MAP_OLD_NEW[$CC_NAME]}" ]  && is_llm=1
-
-    if [ "$is_llm" -eq 0 ]; then
-        echo "Error: '$CC_NAME' is not an LLM-managed module. Only LLM CC modules can be unloaded with this command."
+    # Refuse to unload Linux built-ins
+    if is_builtin "$CC_NAME"; then
+        echo "Error: '$CC_NAME' is a Linux built-in module and cannot be unloaded with this command."
         exit 1
     fi
 
-    active_cc=$(tr -d '[:space:]' < "$CC_PATH" 2>/dev/null)
-
+    # Refuse if currently active
+    active_cc=$(get_active_cc)
     if [ "$CC_NAME" == "$active_cc" ]; then
-        echo "Error: '$CC_NAME' is currently active. Switch to another congestion control before unloading."
-        echo "Use:"
+        echo "Error: '$CC_NAME' is currently active. Switch to another CC before unloading:"
         echo "  sudo ./cc.sh -a <other_cc>"
         exit 1
     fi
 
-    AVAILABLE=$(sysctl -n net.ipv4.tcp_available_congestion_control)
-
-    if echo "$AVAILABLE" | grep -qw "$CC_NAME"; then
+    # Step 1: rmmod if loaded
+    if is_kernel_loaded "$CC_NAME"; then
 
         echo "Unloading kernel module: $CC_NAME"
 
@@ -422,6 +490,7 @@ unload_cc() {
         echo "Module '$CC_NAME' is not currently loaded in kernel (skipping rmmod)."
     fi
 
+    # Step 2: Remove all related files from repo/
     echo "Removing repo files for '$CC_NAME'..."
 
     shopt -s nullglob
@@ -438,28 +507,6 @@ unload_cc() {
     fi
 
     shopt -u nullglob
-
-    if grep -qw "$CC_NAME" "$LOADED_FILE" 2>/dev/null; then
-
-        echo "Removing registry entry for '$CC_NAME' from .loaded_cc..."
-
-        TMPFILE=$(mktemp)
-
-        while read -r old new; do
-            [ -z "$old" ] && continue
-            if [ "$old" == "$CC_NAME" ] || [ "$new" == "$CC_NAME" ]; then
-                echo "  Removed entry: $old $new"
-            else
-                echo "$old $new" >> "$TMPFILE"
-            fi
-        done < "$LOADED_FILE"
-
-        cp "$TMPFILE" "$LOADED_FILE"
-        rm -f "$TMPFILE"
-
-    else
-        echo "No registry entry found for '$CC_NAME' in .loaded_cc."
-    fi
 
     echo "Done. '$CC_NAME' has been fully unloaded and removed."
 }
@@ -483,12 +530,16 @@ case "$1" in
         activate_cc "$2"
         ;;
 
+    -r)
+        rename_cc "$2" "$3"
+        ;;
+
     -u)
         unload_cc "$2"
         ;;
 
     -l)
-        get_loaded_llm_cc
+        list_one_line
         ;;
 
     *)
