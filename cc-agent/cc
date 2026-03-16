@@ -6,26 +6,26 @@
 #
 # Commands:
 #
-#   ./cc.sh
+#   cc
 #       Show current active congestion control
 #
-#   ./cc.sh -ls
+#   cc -ls
 #       List congestion control modules
 #
-#   ./cc.sh -s <cc>
+#   sudo cc -s <cc>
 #       Load congestion control module — if source is from traces/, prompts
 #       for a rename before copying to repo/, compiling, and loading
 #
-#   ./cc.sh -a <cc>
+#   cc -a <cc>
 #       Activate congestion control
 #
-#   ./cc.sh -r <old> <new>
-#       Rename a module (unloads if needed, copies to repo, renames internals)
+#   sudo cc -r <old> <new>
+#       Rename a module (copies to repo, renames internals, original untouched)
 #
-#   ./cc.sh -u <cc>
+#   cc -u <cc>
 #       Unload LLM congestion control module (rmmod + remove repo files)
 #
-#   ./cc.sh -l
+#   cc -l
 #       Print all available CC in one space-separated line
 #       (union of repo/*.ko names and sysctl list, proxy excluded)
 #
@@ -38,7 +38,7 @@
 
 CC_PATH="/sys/module/tcp_proxy/parameters/delegate_cc"
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 
 TRACES_DIR="$SCRIPT_DIR/agent/traces"
 REPO_DIR="$TRACES_DIR/repo"
@@ -50,23 +50,18 @@ mkdir -p "$REPO_DIR"
 # Helpers
 # ----------------------------------------------------------
 
-# Returns 0 if $1 is currently loaded in the kernel
 is_kernel_loaded() {
     sysctl -n net.ipv4.tcp_available_congestion_control \
         | grep -qw "$1"
 }
 
-# Returns 0 if $1 is a Linux built-in (present in sysctl, not in repo/)
 is_builtin() {
     local name="$1"
-    # A .ko in repo/ is the authoritative LLM signal; .c alone is not enough
     [ -f "$REPO_DIR/$name.ko" ] && return 1
     sysctl -n net.ipv4.tcp_available_congestion_control \
         | grep -qw "$name"
 }
 
-# Returns 0 if $1 is LLM-managed:
-# has a .c anywhere under traces/ (including repo/) OR a .ko in repo/
 is_llm() {
     local name="$1"
     [ -f "$REPO_DIR/$name.ko" ] && return 0
@@ -110,7 +105,6 @@ list_one_line() {
     declare -A seen
     result=()
 
-    # Repo entries: only .ko files — presence of .ko means the module is known
     for ko in "$REPO_DIR"/*.ko; do
         [ -e "$ko" ] || continue
         name=$(basename "$ko" .ko)
@@ -158,84 +152,53 @@ list_cc() {
 
     declare -A SHOWN
 
-    # ----------------------------------------------------------
-    # Built-in CC first (from sysctl, not in repo/)
-    # ----------------------------------------------------------
-
+    # Built-in CC first
     for cc in "${kernel_cc[@]}"; do
-
         [[ "$cc" == "proxy" ]] && continue
-
-        # Only show here if not LLM-managed
-        # A .ko in repo/ is the authoritative signal — ignore .c alone
         [ -f "$REPO_DIR/$cc.ko" ] && continue
         found=$(find "$TRACES_DIR" -not -path "$REPO_DIR/*" \
                     -type f -name "$cc.c" ! -name "*.mod.c" 2>/dev/null | head -n1)
         [ -n "$found" ] && continue
-
         SHOWN["$cc"]=1
         marker=""
         [ "$cc" == "$active_cc" ] && marker="*"
-
         printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
             "$cc" "yes" "yes" "-" "$marker"
-
     done
 
-    # ----------------------------------------------------------
-    # LLM modules: .ko in repo/ — presence of .ko means loaded=yes
-    # (we do not iterate .c files here; a .c without a .ko is not yet compiled)
-    # ----------------------------------------------------------
-
+    # LLM: .ko in repo/ → loaded=yes
     for ko in "$REPO_DIR"/*.ko; do
-
         [ -e "$ko" ] || continue
         name=$(basename "$ko" .ko)
         [[ "$name" == *.mod ]] && continue
         SHOWN["$name"]=1
-
         marker=""
         [ "$name" == "$active_cc" ] && marker="*"
-
         printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
             "$name" "no" "yes" "-" "$marker"
-
     done
 
-    # ----------------------------------------------------------
-    # LLM modules: .c in repo/ but no .ko yet (renamed, not compiled)
-    # ----------------------------------------------------------
-
+    # LLM: .c in repo/ but no .ko yet (renamed, not compiled)
     for src in "$REPO_DIR"/*.c; do
-
         [ -e "$src" ] || continue
         name=$(basename "$src" .c)
         [[ "$name" == *.mod ]] && continue
-        [ -n "${SHOWN[$name]}" ] && continue   # already shown via .ko
+        [ -n "${SHOWN[$name]}" ] && continue
         SHOWN["$name"]=1
-
         marker=""
         [ "$name" == "$active_cc" ] && marker="*"
-
         printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
             "$name" "no" "no" "-" "$marker"
-
     done
 
-    # ----------------------------------------------------------
-    # LLM modules: .c only in traces/ subdirs (not yet in repo/)
-    # ----------------------------------------------------------
-
+    # LLM: .c only in traces/ subdirs (not yet in repo/)
     while IFS= read -r f; do
-
         name=$(basename "$f" .c)
         [[ "$name" == *.mod ]] && continue
         [ -n "${SHOWN[$name]}" ] && continue
         SHOWN["$name"]=1
-
         printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
             "$name" "no" "no" "-" ""
-
     done < <(find "$TRACES_DIR" \
                   -not -path "$REPO_DIR/*" \
                   -type f \
@@ -247,8 +210,6 @@ list_cc() {
 
 # ----------------------------------------------------------
 # Load congestion control module (-s)
-# Compile from traces/ if not yet in repo/, then insmod.
-# No rename prompt — use -r to rename.
 # ----------------------------------------------------------
 
 load_cc() {
@@ -260,13 +221,11 @@ load_cc() {
         exit 1
     fi
 
-    # Already loaded in kernel
     if is_kernel_loaded "$CC_NAME"; then
         echo "Module $CC_NAME already loaded."
         return
     fi
 
-    # Already compiled in repo/ — just insmod
     if [ -f "$REPO_DIR/$CC_NAME.ko" ]; then
         echo "Loading promoted module..."
         sudo insmod "$REPO_DIR/$CC_NAME.ko"
@@ -274,12 +233,10 @@ load_cc() {
         return
     fi
 
-    # Source already in repo/ (renamed but not yet compiled) — compile and load
     if [ -f "$REPO_DIR/$CC_NAME.c" ]; then
         SRC="$REPO_DIR/$CC_NAME.c"
         FROM_TRACES=0
     else
-        # Source is in traces/ — require rename before loading
         SRC=$(find "$TRACES_DIR" \
                    -not -path "$REPO_DIR/*" \
                    -type f \
@@ -294,7 +251,6 @@ load_cc() {
         exit 1
     fi
 
-    # Modules coming from traces/ must be renamed first
     if [ "$FROM_TRACES" -eq 1 ]; then
         echo "Module '$CC_NAME' is from traces/ and must be renamed before loading."
         echo "Enter new name (or press Enter to keep '$CC_NAME'):"
@@ -302,7 +258,6 @@ load_cc() {
         NEW_NAME="${NEW_NAME:-$CC_NAME}"
 
         if [ "$NEW_NAME" != "$CC_NAME" ]; then
-            # Refuse if new name already exists in repo/
             if [ -f "$REPO_DIR/$NEW_NAME.c" ] || [ -f "$REPO_DIR/$NEW_NAME.ko" ]; then
                 echo "Error: '$NEW_NAME' already exists in repo/. Choose a different name."
                 exit 1
@@ -313,7 +268,6 @@ load_cc() {
             echo "Original untouched: $SRC"
             CC_NAME="$NEW_NAME"
         else
-            # No rename — just copy to repo/ as-is
             cp "$SRC" "$REPO_DIR/$CC_NAME.c"
         fi
     fi
@@ -345,9 +299,7 @@ EOF
     fi
 
     echo "Loading module..."
-
     sudo insmod "$CC_NAME.ko"
-
     echo "Module loaded: $CC_NAME"
 
     cd "$ORIG_DIR" || true
@@ -370,25 +322,18 @@ activate_cc() {
     if ! is_kernel_loaded "$CC_NAME"; then
 
         if [ -f "$REPO_DIR/$CC_NAME.ko" ]; then
-
             echo "Module not loaded (reboot?). Auto-loading from repo..."
-
             sudo insmod "$REPO_DIR/$CC_NAME.ko"
-
             if ! is_kernel_loaded "$CC_NAME"; then
                 echo "Error: insmod succeeded but $CC_NAME still not visible in kernel."
                 exit 1
             fi
-
             echo "Module loaded: $CC_NAME"
-
         else
-
             echo "Error: $CC_NAME not loaded and no compiled .ko found in repo."
             echo "Use:"
-            echo "  sudo ./cc.sh -s $CC_NAME"
+            echo "  sudo cc -s $CC_NAME"
             exit 1
-
         fi
 
     fi
@@ -412,7 +357,7 @@ rename_cc() {
     NEW_NAME="$2"
 
     if [ -z "$OLD_NAME" ] || [ -z "$NEW_NAME" ]; then
-        echo "Error: Usage: ./cc.sh -r <old_name> <new_name>"
+        echo "Error: Usage: sudo cc -r <old_name> <new_name>"
         exit 1
     fi
 
@@ -421,19 +366,16 @@ rename_cc() {
         exit 1
     fi
 
-    # Refuse to rename a Linux built-in
     if is_builtin "$OLD_NAME"; then
         echo "Error: '$OLD_NAME' is a Linux built-in module and cannot be renamed."
         exit 1
     fi
 
-    # Refuse if new name already exists in repo/
     if [ -f "$REPO_DIR/$NEW_NAME.c" ] || [ -f "$REPO_DIR/$NEW_NAME.ko" ]; then
         echo "Error: '$NEW_NAME' already exists in repo/. Choose a different name."
         exit 1
     fi
 
-    # Find the source: check repo/ first, then traces/ subdirs
     SRC=""
     [ -f "$REPO_DIR/$OLD_NAME.c" ] && SRC="$REPO_DIR/$OLD_NAME.c"
 
@@ -452,15 +394,12 @@ rename_cc() {
     fi
 
     echo "Creating renamed copy '$OLD_NAME' -> '$NEW_NAME' in repo/..."
-
     cp "$SRC" "$REPO_DIR/$NEW_NAME.c"
     sed -i "s/\b${OLD_NAME}\b/${NEW_NAME}/g" "$REPO_DIR/$NEW_NAME.c"
-
     echo "Renamed copy stored at: $REPO_DIR/$NEW_NAME.c"
     echo "Original untouched: $SRC"
-    echo "Done. '$NEW_NAME' is ready — use './cc.sh -s $NEW_NAME' to load it."
+    echo "Done. '$NEW_NAME' is ready — use 'sudo cc -s $NEW_NAME' to load it."
 }
-
 
 
 # ----------------------------------------------------------
@@ -476,45 +415,34 @@ unload_cc() {
         exit 1
     fi
 
-    # Refuse to unload Linux built-ins
     if is_builtin "$CC_NAME"; then
         echo "Error: '$CC_NAME' is a Linux built-in module and cannot be unloaded with this command."
         exit 1
     fi
 
-    # Refuse if currently active
     active_cc=$(get_active_cc)
     if [ "$CC_NAME" == "$active_cc" ]; then
         echo "Error: '$CC_NAME' is currently active. Switch to another CC before unloading:"
-        echo "  sudo ./cc.sh -a <other_cc>"
+        echo "  sudo cc -a <other_cc>"
         exit 1
     fi
 
-    # Step 1: rmmod if loaded
     if is_kernel_loaded "$CC_NAME"; then
-
         echo "Unloading kernel module: $CC_NAME"
-
         sudo rmmod "$CC_NAME"
-
         if [ $? -ne 0 ]; then
             echo "Error: rmmod failed for '$CC_NAME'. The module may be in use."
             exit 1
         fi
-
         echo "Kernel module removed."
-
     else
         echo "Module '$CC_NAME' is not currently loaded in kernel (skipping rmmod)."
     fi
 
-    # Step 2: Remove all related files from repo/
     echo "Removing repo files for '$CC_NAME'..."
 
     shopt -s nullglob
-
     repo_files=( "$REPO_DIR/$CC_NAME"* "$REPO_DIR/.$CC_NAME"* )
-
     if [ ${#repo_files[@]} -eq 0 ]; then
         echo "No repo files found for '$CC_NAME'."
     else
@@ -523,7 +451,6 @@ unload_cc() {
             rm -f "$f"
         done
     fi
-
     shopt -u nullglob
 
     echo "Done. '$CC_NAME' has been fully unloaded and removed."
