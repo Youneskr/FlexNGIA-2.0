@@ -29,6 +29,12 @@
 #       Print all available CC in one space-separated line
 #       (union of repo/*.ko names and sysctl list, proxy excluded)
 #
+#   cc -d <cc> [description]
+#   cc description <cc> [description]
+#       Set or show description for a CC module.
+#       If [description] is omitted, prints the current description.
+#       If [description] is provided, saves it.
+#
 # ==========================================================
 
 
@@ -44,6 +50,10 @@ TRACES_DIR="$SCRIPT_DIR/agent/traces"
 REPO_DIR="$TRACES_DIR/repo"
 
 mkdir -p "$REPO_DIR"
+
+# Key-value file storing descriptions: one "key=value" pair per line
+DESC_FILE="$REPO_DIR/descriptions.kv"
+touch "$DESC_FILE"
 
 
 # ----------------------------------------------------------
@@ -77,6 +87,42 @@ get_active_cc() {
     tr -d '[:space:]' < "$CC_PATH" 2>/dev/null
 }
 
+# Read description for a given CC name from DESC_FILE.
+# Prints the description string, or an empty string if not set.
+get_description() {
+    local name="$1"
+    grep "^${name}=" "$DESC_FILE" 2>/dev/null \
+        | head -n1 \
+        | cut -d'=' -f2-
+}
+
+# Write (or overwrite) the description for a given CC name in DESC_FILE.
+set_description() {
+    local name="$1"
+    local desc="$2"
+    # Remove any existing entry for this name, then append the new one
+    sed -i "/^${name}=/d" "$DESC_FILE"
+    printf '%s=%s\n' "$name" "$desc" >> "$DESC_FILE"
+}
+
+# Rename the description key when a module is renamed.
+rename_description() {
+    local old="$1"
+    local new="$2"
+    local desc
+    desc=$(get_description "$old")
+    if [ -n "$desc" ]; then
+        sed -i "/^${old}=/d" "$DESC_FILE"
+        printf '%s=%s\n' "$new" "$desc" >> "$DESC_FILE"
+    fi
+}
+
+# Remove the description entry for a given CC name.
+delete_description() {
+    local name="$1"
+    sed -i "/^${name}=/d" "$DESC_FILE"
+}
+
 
 # ----------------------------------------------------------
 # Show active CC (default, no args)
@@ -90,6 +136,8 @@ show_current_cc() {
             echo "No congestion control is currently active."
         else
             echo "Current active congestion control: $current_cc"
+            desc=$(get_description "$current_cc")
+            [ -n "$desc" ] && echo "Description: $desc"
         fi
     else
         echo "Error: delegate_cc parameter not found."
@@ -147,10 +195,10 @@ list_cc() {
     done
 
     echo ""
-    printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
+    printf "%-20s | %-8s | %-7s | %-30s | %-6s\n" \
         "CC name" "built-in" "loaded" "description" "active"
-    printf "%-20s-+-%-8s-+-%-7s-+-%-12s-+-%-6s\n" \
-        "--------------------" "--------" "-------" "-----------" "------"
+    printf "%-20s-+-%-8s-+-%-7s-+-%-30s-+-%-6s\n" \
+        "--------------------" "--------" "-------" "------------------------------" "------"
 
     declare -A SHOWN
 
@@ -165,8 +213,9 @@ list_cc() {
         SHOWN["$cc"]=1
         marker=""
         [ "$cc" == "$active_cc" ] && marker="*"
-        printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
-            "$cc" "yes" "yes" "-" "$marker"
+        desc=$(get_description "$cc")
+        printf "%-20s | %-8s | %-7s | %-30s | %-6s\n" \
+            "$cc" "yes" "yes" "${desc:--}" "$marker"
     done
 
     # LLM: .ko in repo/ → loaded=yes
@@ -177,8 +226,9 @@ list_cc() {
         SHOWN["$name"]=1
         marker=""
         [ "$name" == "$active_cc" ] && marker="*"
-        printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
-            "$name" "no" "yes" "-" "$marker"
+        desc=$(get_description "$name")
+        printf "%-20s | %-8s | %-7s | %-30s | %-6s\n" \
+            "$name" "no" "yes" "${desc:--}" "$marker"
     done
 
     # LLM: .c in repo/ but no .ko yet (renamed or unloaded)
@@ -190,8 +240,9 @@ list_cc() {
         SHOWN["$name"]=1
         marker=""
         [ "$name" == "$active_cc" ] && marker="*"
-        printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
-            "$name" "no" "no" "-" "$marker"
+        desc=$(get_description "$name")
+        printf "%-20s | %-8s | %-7s | %-30s | %-6s\n" \
+            "$name" "no" "no" "${desc:--}" "$marker"
     done
 
     # LLM: .c only in traces/ subdirs (not yet in repo/)
@@ -200,8 +251,9 @@ list_cc() {
         [[ "$name" == *.mod ]] && continue
         [ -n "${SHOWN[$name]}" ] && continue
         SHOWN["$name"]=1
-        printf "%-20s | %-8s | %-7s | %-12s | %-6s\n" \
-            "$name" "no" "no" "-" ""
+        desc=$(get_description "$name")
+        printf "%-20s | %-8s | %-7s | %-30s | %-6s\n" \
+            "$name" "no" "no" "${desc:--}" ""
     done < <(find "$TRACES_DIR" \
                   -not -path "$REPO_DIR/*" \
                   -type f \
@@ -268,6 +320,8 @@ load_cc() {
             echo "Creating renamed copy '$CC_NAME' -> '$NEW_NAME' in repo/..."
             cp "$SRC" "$REPO_DIR/$NEW_NAME.c"
             sed -i "s/\b${CC_NAME}\b/${NEW_NAME}/g" "$REPO_DIR/$NEW_NAME.c"
+            # Carry over any existing description under the old name
+            rename_description "$CC_NAME" "$NEW_NAME"
             echo "Original untouched: $SRC"
             CC_NAME="$NEW_NAME"
         else
@@ -399,6 +453,8 @@ rename_cc() {
     echo "Creating renamed copy '$OLD_NAME' -> '$NEW_NAME' in repo/..."
     cp "$SRC" "$REPO_DIR/$NEW_NAME.c"
     sed -i "s/\b${OLD_NAME}\b/${NEW_NAME}/g" "$REPO_DIR/$NEW_NAME.c"
+    # Carry over the description under the new name
+    rename_description "$OLD_NAME" "$NEW_NAME"
     echo "Renamed copy stored at: $REPO_DIR/$NEW_NAME.c"
     echo "Original untouched: $SRC"
     echo "Done. '$NEW_NAME' is ready — use 'sudo cc -s $NEW_NAME' to load it."
@@ -472,6 +528,43 @@ unload_cc() {
 
 
 # ----------------------------------------------------------
+# Set or show description for a CC module (-d / description)
+#
+#   cc -d <cc>               → print current description
+#   cc -d <cc> <text...>     → save description
+# ----------------------------------------------------------
+
+manage_description() {
+
+    CC_NAME="$1"
+    shift
+    DESC_TEXT="$*"
+
+    if [ -z "$CC_NAME" ]; then
+        echo "Error: No CC name provided."
+        echo "Usage:"
+        echo "  cc -d <cc>                 # show description"
+        echo "  cc -d <cc> <description>   # set description"
+        exit 1
+    fi
+
+    if [ -z "$DESC_TEXT" ]; then
+        # Read mode
+        desc=$(get_description "$CC_NAME")
+        if [ -n "$desc" ]; then
+            echo "$CC_NAME: $desc"
+        else
+            echo "$CC_NAME: (no description set)"
+        fi
+    else
+        # Write mode
+        set_description "$CC_NAME" "$DESC_TEXT"
+        echo "Description saved for '$CC_NAME': $DESC_TEXT"
+    fi
+}
+
+
+# ----------------------------------------------------------
 # Dispatcher
 # ----------------------------------------------------------
 
@@ -499,6 +592,10 @@ case "$1" in
 
     -l)
         list_one_line
+        ;;
+
+    -d|description)
+        manage_description "${@:2}"
         ;;
 
     *)
