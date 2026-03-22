@@ -548,14 +548,18 @@ manage_description() {
         exit 1
     fi
 
-    if [ -z "$DESC_TEXT" ]; then
-        # Read mode
+    if [ -z "$DESC_TEXT" ] && [ "$#" -eq 0 ]; then
+        # Read mode — no extra args at all
         desc=$(get_description "$CC_NAME")
         if [ -n "$desc" ]; then
             echo "$CC_NAME: $desc"
         else
             echo "$CC_NAME: (no description set)"
         fi
+    elif [ "$DESC_TEXT" == "--clear" ] || [ -z "$DESC_TEXT" ]; then
+        # Delete mode — either --clear flag or explicit empty string ("")
+        delete_description "$CC_NAME"
+        echo "Description cleared for '$CC_NAME'."
     else
         # Write mode
         set_description "$CC_NAME" "$DESC_TEXT"
