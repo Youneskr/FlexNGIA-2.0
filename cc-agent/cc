@@ -87,6 +87,17 @@ get_active_cc() {
     tr -d '[:space:]' < "$CC_PATH" 2>/dev/null
 }
 
+# Truncate a description to fit a column width, appending "..." if needed.
+truncate_desc() {
+    local text="$1"
+    local max="$2"
+    if [ "${#text}" -gt "$max" ]; then
+        echo "${text:0:$((max - 3))}..."
+    else
+        echo "$text"
+    fi
+}
+
 # Read description for a given CC name from DESC_FILE.
 # Prints the description string, or an empty string if not set.
 get_description() {
@@ -214,8 +225,9 @@ list_cc() {
         marker=""
         [ "$cc" == "$active_cc" ] && marker="*"
         desc=$(get_description "$cc")
+        desc=$(truncate_desc "${desc:--}" 30)
         printf "%-20s | %-8s | %-7s | %-30s | %-6s\n" \
-            "$cc" "yes" "yes" "${desc:--}" "$marker"
+            "$cc" "yes" "yes" "$desc" "$marker"
     done
 
     # LLM: .ko in repo/ → loaded=yes
@@ -227,8 +239,9 @@ list_cc() {
         marker=""
         [ "$name" == "$active_cc" ] && marker="*"
         desc=$(get_description "$name")
+        desc=$(truncate_desc "${desc:--}" 30)
         printf "%-20s | %-8s | %-7s | %-30s | %-6s\n" \
-            "$name" "no" "yes" "${desc:--}" "$marker"
+            "$name" "no" "yes" "$desc" "$marker"
     done
 
     # LLM: .c in repo/ but no .ko yet (renamed or unloaded)
@@ -241,8 +254,9 @@ list_cc() {
         marker=""
         [ "$name" == "$active_cc" ] && marker="*"
         desc=$(get_description "$name")
+        desc=$(truncate_desc "${desc:--}" 30)
         printf "%-20s | %-8s | %-7s | %-30s | %-6s\n" \
-            "$name" "no" "no" "${desc:--}" "$marker"
+            "$name" "no" "no" "$desc" "$marker"
     done
 
     # LLM: .c only in traces/ subdirs (not yet in repo/)
@@ -252,8 +266,9 @@ list_cc() {
         [ -n "${SHOWN[$name]}" ] && continue
         SHOWN["$name"]=1
         desc=$(get_description "$name")
+        desc=$(truncate_desc "${desc:--}" 30)
         printf "%-20s | %-8s | %-7s | %-30s | %-6s\n" \
-            "$name" "no" "no" "${desc:--}" ""
+            "$name" "no" "no" "$desc" ""
     done < <(find "$TRACES_DIR" \
                   -not -path "$REPO_DIR/*" \
                   -type f \
