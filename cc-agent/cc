@@ -582,6 +582,131 @@ manage_description() {
     fi
 }
 
+# ----------------------------------------------------------
+# Help (-h / --help)
+# ----------------------------------------------------------
+
+show_help() {
+    cat <<'EOF'
+
+NAME
+    cc — FlexNGIA congestion control manager
+
+SYNOPSIS
+    cc
+    cc -ls
+    cc -l
+    cc -a <module>
+    cc -d <module> [description]
+    cc -u <module>
+    sudo cc -s <module>
+    sudo cc -r <old> <new>
+
+COMMANDS
+    cc
+        Show the currently active congestion control and its description.
+
+    -ls
+        List all known CC modules in a table (name, built-in, loaded,
+        description, active marker).
+
+    -l
+        Print all available CC names on one space-separated line.
+        Useful for scripting. Excludes 'proxy'.
+
+        Example:
+            $ cc -l
+            cubic reno bbr my_llm_cc
+
+            $ for m in $(cc -l); do echo "$m"; done
+
+    -a <module>
+        Activate a CC module. If not loaded but a compiled .ko exists
+        in repo/, it is auto-loaded first.
+
+        Example:
+            $ cc -a cubic
+            $ cc -a my_llm_cc
+
+        If not loaded and no .ko exists, run: sudo cc -s <module>
+
+    -s <module>   [requires sudo]
+        Load (promote) a CC module into the kernel. Locates the .c
+        source in repo/ or traces/, compiles it, then insmod's it.
+        If source is from traces/, prompts for a rename before copying
+        into repo/.
+
+        Example:
+            $ sudo cc -s my_cc
+            $ sudo cc -s tcp_trace_20240101
+            # Prompted: Enter new name (or Enter to keep current):
+
+    -r <old> <new>   [requires sudo]
+        Rename a module. Creates an independent copy in repo/ with all
+        internal references rewritten to the new name. The original file
+        is never modified or unloaded. Description is carried over.
+
+        Example:
+            $ sudo cc -r tcp_draft tcp_v2
+            $ sudo cc -s tcp_v2     # compile and load the renamed copy
+
+        Cannot rename Linux built-in modules.
+        Target name must not already exist in repo/.
+
+    -u <module>
+        Unload an LLM-managed module: removes it from the kernel (rmmod)
+        and deletes compiled artifacts (.ko, .o, .mod, etc.).
+        The .c source is kept so the module can be reloaded with -s.
+
+        Example:
+            $ cc -a cubic           # switch away first
+            $ cc -u my_llm_cc
+
+        Cannot unload built-in modules.
+        Cannot unload the currently active CC — switch away first.
+
+    -d <module> [description]
+    description <module> [description]
+        Get or set a description for a CC module.
+
+        Example:
+            $ cc -d my_llm_cc                          # show
+            $ cc -d my_llm_cc "LLM-tuned, 10G traces"  # set
+            $ cc -d my_llm_cc --clear                  # clear
+            $ cc description cubic "Linux default"     # long form
+
+TYPICAL WORKFLOWS
+    Full lifecycle: load → describe → activate → unload
+        $ sudo cc -s my_cc
+        $ cc -d my_cc "Experimental low-latency variant"
+        $ cc -a my_cc
+        $ cc -a cubic && cc -u my_cc
+
+    Promote a trace, rename during load
+        $ sudo cc -s tcp_trace_xyz     # prompted for new name
+        $ cc -a tcp_exp1
+
+    Fork an existing module under a new name
+        $ sudo cc -r bbr_v1 bbr_v2
+        $ sudo cc -s bbr_v2
+        $ cc -a bbr_v2
+
+    Check everything at a glance
+        $ cc -ls
+
+FILES
+    agent/traces/              Raw trace-derived .c sources (originals)
+    agent/traces/repo/         Promoted, compiled, and renamed modules
+    agent/traces/repo/descriptions.kv   Key=value description store
+    /sys/module/tcp_proxy/parameters/delegate_cc   Active CC sysfs node
+
+EXIT CODES
+    0   Success
+    1   Error (missing argument, compile failure, rmmod refused, etc.)
+
+EOF
+}
+
 
 # ----------------------------------------------------------
 # Dispatcher
@@ -615,6 +740,10 @@ case "$1" in
 
     -d|description)
         manage_description "${@:2}"
+        ;;
+
+    -h|--help)
+        show_help
         ;;
 
     *)
