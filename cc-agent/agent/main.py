@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
+
 from langchain_core.prompts import ChatPromptTemplate
 
 from schemas import AgentOutput
@@ -31,35 +33,41 @@ load_dotenv()
 #        Only one `llm = ...` block should be active at a time.
 # ---------------------------------------------------------
 
-# GROQ
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    groq_api_key=os.getenv("GROQ_API_KEY"),
-    temperature=0,
-)
+def load_llm():
+    provider   = os.getenv("LLM_PROVIDER", "GROQ").upper()
+    model      = os.getenv("LLM_MODEL")
+    temperature = float(os.getenv("LLM_TEMPERATURE", 0))
 
-# GEMINI
-# llm = ChatGoogleGenerativeAI(
-#     model="",
-#     google_api_key=os.getenv("GEMINI_API_KEY"),
-#     temperature=0,
-# )
+    if provider == "GROQ":
+        return ChatGroq(
+            model=model,
+            groq_api_key=os.getenv("GROQ_API_KEY"),
+            temperature=temperature,
+        )
+    elif provider == "GEMINI":
+        return ChatGoogleGenerativeAI(
+            model=model,
+            google_api_key=os.getenv("GEMINI_API_KEY"),
+            temperature=temperature,
+        )
+    elif provider == "OPENAI":
+        return ChatOpenAI(
+            model=model,
+            api_key=os.getenv("OPENAI_API_KEY"),
+            temperature=temperature,
+        )
+    elif provider == "OPENROUTER":
+        return ChatOpenAI(
+            model=model,
+            api_key=os.getenv("OPENROUTER_API_KEY"),
+            base_url="https://openrouter.ai/api/v1",
+            temperature=temperature,
+        )
+    else:
+        raise ValueError(f"Unknown LLM_PROVIDER: '{provider}'. Choose from: GROQ, GEMINI, OPENAI, OPENROUTER")
 
-# OPENAI
-# llm = ChatOpenAI(
-#     model="",
-#     api_key=os.getenv("OPENAI_API_KEY"),
-#     temperature=0,
-# )
 
-# OPENROUTER (supports any model from openrouter.ai/models)
-# llm = ChatOpenAI(
-#     model="",
-#     api_key=os.getenv("OPENROUTER_API_KEY"),
-#     base_url="https://openrouter.ai/api/v1",
-#     temperature=0,
-# )
-
+llm = load_llm()
 structured_llm = llm.with_structured_output(AgentOutput)
 
 
