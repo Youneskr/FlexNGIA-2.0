@@ -39,7 +39,7 @@ done
 RUN_DIR="$RESULTS_DIR/$count"
 mkdir -p "$RUN_DIR"
 
-LOG_FILE="$RUN_DIR/$count.csv"
+LOG_FILE="$RUN_DIR/tcptraces-exp$count.csv"
 
 echo "[*] Run directory: $RUN_DIR"
 echo "[*] CSV log file: $LOG_FILE"

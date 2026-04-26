@@ -46,7 +46,7 @@ CC_PATH="/sys/module/tcp_proxy/parameters/delegate_cc"
 
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 
-TRACES_DIR="$SCRIPT_DIR/agent/traces"
+TRACES_DIR="$SCRIPT_DIR/agent"
 REPO_DIR="$TRACES_DIR/repo"
 
 mkdir -p "$REPO_DIR"

@@ -1,0 +1,36 @@
+# Summary Report : Application, Environment, QoS, QoE, Requiements
+
+# Application Profile (App Analysis Agent)
+- Application Type: Video streaming
+- Target QoS Profile:
+ - E2e Delay: ≤ 90 ms
+ - Throughput: ≥ 12 Mbps and stable
+ - Startup Delay: ≤ 2 seconds
+
+# Device & Environment (Environment Analysis Agent)
+- Network Interface: Wi-Fi
+- Current Congestion Control Algorithm: Reno
+- RF Environment: 
+ - Signal Strength (RSSI): –65 dBm
+ - Frequency Band: 2.4 GHz
+- Wi-Fi Details:
+ - PHY Mode: 802.11g
+- Mobility Context: Stationary
+
+# Observed QoS Metrics (Multi-layer QoS Measurement Agent)
+- CWND: (μ=103.54, σ=25.15) ⬊, range=[10–329]
+- RTT: (μ=136.55 ms, σ=7.96) ⬊, range=[131.0–296.0] ms
+- Throughput: (μ=8.17 Mbps, σ=12.62) ⬈, range=[0.0–1307.0] Mbps
+- Lost Segments: (μ=244.61, σ=28.06) ⬊, range=[0–252]
+
+# User-Perceived Quality (QoE Measurement Agent)
+- AI-Predicted QoE Score: 0.63/1
+- Startup Delay Perceived: Noticeable
+- Current Resolution: 720p
+- Buffering Events: Pixelated
+- Visual Quality: Choppy
+
+# Runtime Requirements (Requirement Inference Agent)
+- Key Priorities Inferred: Maintain video smoothness
+- QoS: Further Increase throughput
+- Behavioral Logic: User prioritizes smooth playback over resolution

@@ -12,7 +12,7 @@ RESULTS_DIR = os.path.join(
 )
 
 def get_latest_csv():
-    """Find the most recent results/<session>/<session>.csv file"""
+    """Find the most recent results/<session>/tcptraces-exp<session>.csv file"""
 
     if not os.path.exists(RESULTS_DIR):
         return None
@@ -25,7 +25,7 @@ def get_latest_csv():
         if not os.path.isdir(session_dir):
             continue
 
-        csv_path = os.path.join(session_dir, f"{d}.csv")
+        csv_path = os.path.join(session_dir, f"tcptraces-exp{d}.csv")
 
         if os.path.exists(csv_path):
             csv_files.append(csv_path)
@@ -36,6 +36,7 @@ def get_latest_csv():
     return max(csv_files, key=os.path.getmtime)
 
 
+#----------------------------------------------------------
 def main():
     csv_file = get_latest_csv()
 

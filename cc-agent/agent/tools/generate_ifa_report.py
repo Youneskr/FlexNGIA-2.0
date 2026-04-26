@@ -15,7 +15,7 @@ TEMPLATE_DIR = AGENT_DIR
 TEMPLATE_FILE = "IFA_Report_Template.j2"
 
 # output report
-OUTPUT_FILE = os.path.join(AGENT_DIR, "traces", "IFA_Report_Filled.txt")
+OUTPUT_FILE = os.path.join(AGENT_DIR, "IFA_Report_Filled.tmp.txt")
 
 # metrics script
 METRICS_SCRIPT = os.path.join(TOOLS_DIR, "get_metrics_summary.py")
@@ -36,8 +36,8 @@ def get_metrics():
     return json.loads(result.stdout)
 
 
-def detect_trend(std, avg):
-    """Basic trend heuristic"""
+def detect_volatility(std, avg):
+    """Basic volatility heuristic"""
 
     if std > avg * 0.3:
         return "⬈"
@@ -58,10 +58,10 @@ def build_context(metrics):
     lost = m["lost_segments"]
 
     return {
-        "cwnd": {**cwnd, "trend": detect_trend(cwnd["std"], cwnd["avg"])},
-        "rate": {**rate, "trend": detect_trend(rate["std"], rate["avg"])},
-        "rtt": {**rtt, "trend": detect_trend(rtt["std"], rtt["avg"])},
-        "lost": {**lost, "trend": detect_trend(lost["std"], lost["avg"])}
+        "cwnd": {**cwnd, "volatility": detect_volatility(cwnd["std"], cwnd["avg"])},
+        "rate": {**rate, "volatility": detect_volatility(rate["std"], rate["avg"])},
+        "rtt": {**rtt, "volatility": detect_volatility(rtt["std"], rtt["avg"])},
+        "lost": {**lost, "volatility": detect_volatility(lost["std"], lost["avg"])}
 
     }
 
