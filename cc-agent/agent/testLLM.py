@@ -11,7 +11,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 
-load_dotenv()
+load_dotenv("config.env")
 
 
 def get_response_text(response):
