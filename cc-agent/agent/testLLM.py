@@ -6,12 +6,16 @@
 
 import os
 
+from pathlib import Path
+
 from dotenv import load_dotenv
+ENV_PATH = Path(__file__).resolve().parent / "config.env"
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 
-load_dotenv("config.env")
+load_dotenv(ENV_PATH)
 
 
 def get_response_text(response):

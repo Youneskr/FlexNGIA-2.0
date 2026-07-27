@@ -1,8 +1,10 @@
 import os
 import time
 import random
+from pathlib import Path
 
 from dotenv import load_dotenv
+ENV_PATH = Path(__file__).resolve().parent / "config.env"
 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
@@ -27,7 +29,7 @@ from utilities import (
     switch_congestion_control,
 )
 
-load_dotenv("config.env")
+load_dotenv(ENV_PATH)
 EvaluationInterval=int(os.getenv("EVALUATION_INTERVAL"))
 LLM_ATTEMPTS=int(os.getenv("LLM_ATTEMPTS"))
 LLM_Activated=int(os.getenv("LLM_ACTIVATED"))
