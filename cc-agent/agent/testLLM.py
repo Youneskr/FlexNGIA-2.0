@@ -129,7 +129,7 @@ def main():
     except Exception as e:
         print("[ERROR] LLM is NOT working. ❌")
         print(f"Reason: {e}\n")
-        print("You can modify the LLM configuration by editing the 'agent/.env' file.")
+        print("You can modify the LLM configuration by editing the 'agent/config.env' file.")
         print("This includes the LLM provider, model, temperature, and API key.\n\n")
         print("If you do not already have an API key, you can create one from one of the following providers:")
         print(f"  • Groq:          https://console.groq.com/keys")          
