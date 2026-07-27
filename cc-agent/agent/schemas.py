@@ -10,4 +10,6 @@ class AgentOutput(BaseModel):
     step_6: str = Field(description="Step 6: Suggest parameter adjustments or behavioral improvements.")
     step_7: str = Field(description="Step 7: Predict how a new algorithm will improve performance.")
     step_8: str = Field(description="Step 8: Choose the best action and briefly justify it.")
+    Decision: str = Field(description="1 or 2 or 3 where 1 = Keep current CC, 2 = Switch to an existing TCP CC scheme, 3 = Generate new CC.")
+    switchCC: str = Field(description="if Decision == 2 (Switch to an existing TCP CC scheme), return one of the following: 'cubic', 'bbr', 'reno', 'vegas'")
     c_code: str = Field(description="The complete, valid C code for the Linux Kernel module.")

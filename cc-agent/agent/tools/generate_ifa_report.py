@@ -2,6 +2,7 @@ import json
 import subprocess
 import os
 import sys
+from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 
 # tools/ directory
@@ -14,11 +15,17 @@ AGENT_DIR = os.path.dirname(TOOLS_DIR)
 TEMPLATE_DIR = AGENT_DIR
 TEMPLATE_FILE = "IFA_Report_Template.j2"
 
-# output report
-OUTPUT_FILE = os.path.join(AGENT_DIR, "IFA_Report_Filled.tmp.txt")
 
 # metrics script
 METRICS_SCRIPT = os.path.join(TOOLS_DIR, "get_metrics_summary.py")
+
+if len(sys.argv) != 2:
+    print("Usage: generate_ifa_report.py <output_file>")
+    sys.exit(1)
+
+# output report
+OUTPUT_FILE = sys.argv[1]
+#OUTPUT_FILE = os.path.join(AGENT_DIR, "IFA_Report_Filled.tmp.txt")
 
 
 def get_metrics():
@@ -91,7 +98,9 @@ def main():
     with open(OUTPUT_FILE, "w") as f:
         f.write(report)
 
-    print(f"Report generated → {OUTPUT_FILE}")
+    short_path = Path(*Path(OUTPUT_FILE).parts[-4:])
+    print(f"Report generated → {short_path}")
+    #print(f"Report generated → {OUTPUT_FILE}")
 
 
 if __name__ == "__main__":

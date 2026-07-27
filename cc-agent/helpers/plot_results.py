@@ -1,3 +1,8 @@
+# Usage
+# sudo python3 helpers/plot_results.py [run_directory]
+#
+# Example: sudo python3 helpers/plot_results.py results/14
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -9,8 +14,16 @@ import glob
 
 # =============================================================================
 #  USER-TUNABLE SETTINGS
-#  All visual parameters are defined here.  No need to touch the code below.
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+#  Evaulation Interval -second milestone markers on the x-axis spine
+# -----------------------------------------------------------------------------
+MILESTONE_INTERVAL_SECONDS  = 20       # Evaluation Interval used to add a marker
+MILESTONE_MARKER_COLOR      = 'red'    # fill colour of the bullet
+MILESTONE_MARKER_EDGE_COLOR = 'darkred'
+MILESTONE_MARKER_SIZE       = 7        # diameter in points
+MILESTONE_MARKER_EDGE_WIDTH = 0.8
 
 # -----------------------------------------------------------------------------
 #  Output resolution
@@ -61,14 +74,6 @@ INDIVIDUAL_GRID_ALPHA      = 0.45   # opacity of grid lines
 # -----------------------------------------------------------------------------
 INDIVIDUAL_CC_BAND_ALPHA = 0.32   # opacity of the coloured background bands
 
-# -----------------------------------------------------------------------------
-#  60-second milestone markers on the x-axis spine
-# -----------------------------------------------------------------------------
-MILESTONE_INTERVAL_SECONDS  = 60       # draw a marker every N seconds
-MILESTONE_MARKER_COLOR      = 'red'    # fill colour of the bullet
-MILESTONE_MARKER_EDGE_COLOR = 'darkred'
-MILESTONE_MARKER_SIZE       = 7        # diameter in points
-MILESTONE_MARKER_EDGE_WIDTH = 0.8
 
 # -----------------------------------------------------------------------------
 #  CC interval background colours (cycled when there are more schemes)
@@ -499,7 +504,7 @@ def main():
 
     # Create output directory
     run_id     = os.path.basename(os.path.normpath(run_dir))
-    output_dir = os.path.join("analysis", "images", run_id)
+    output_dir = os.path.join("results", run_id, "figures")
     os.makedirs(output_dir, exist_ok=True)
     print(f"[*] Output directory: {output_dir}")
 

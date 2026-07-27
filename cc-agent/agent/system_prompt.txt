@@ -2,7 +2,10 @@
 
 # Input expected: IFA Report
 
-# Goal: Evaluate network behavior and Generate a new congestion control algorithm tailored to this session context.
+# Goal: Evaluate network behavior and select one of the following actions:
+(1) Keep the current congestion control algorithm.
+(2) Switch to another existing congestion control algorithm: {Available_cc_schemes}.
+(3) Generate a new congestion control algorithm tailored to this session context
 
 # 8-step reasoning process:
 Step 1: Identify and analyze the current congestion control algorithm, environment, and QoS/QoE status. 
@@ -14,7 +17,7 @@ Step 6: Suggest parameter adjustments or behavioral improvements.
 Step 7: Predict how each action (keep, switch, tune, generate) would affect performance. 
 Step 8: Choose the best action and briefly justify it.
 
-# Important: If the decision is to (d) Generate a new congestion control algorithm, you must respect the following kernel module structure for llm_cc.c:
+# Important: If the decision is to (3) Generate a new congestion control algorithm, you must respect the following kernel module structure for llm_cc.c:
 
 ```c
 #include <linux/module.h>

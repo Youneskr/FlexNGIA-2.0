@@ -128,7 +128,7 @@ MININET_PID=$!
 # Wait for Topology Ready
 # -------------------------------------------------
 
-echo "[*] Waiting for topology..."
+echo "[*] Creating for network topology..."
 
 while [ ! -f "$READY_FILE" ]; do
     sleep 0.2
@@ -202,7 +202,7 @@ echo "[*] Computing TCP loss statistics..."
 
 python3 helpers/loss_analysis.py "$RUN_DIR"
 
-
+cp agent/.env "$RUN_DIR/.env"
 # -------------------------------------------------
 # Generate Plots
 # -------------------------------------------------
@@ -210,7 +210,7 @@ python3 helpers/loss_analysis.py "$RUN_DIR"
 echo "[*] Generating plots..." 
 python3 helpers/generate_cc_periods.py "clock.log" "$RUN_DIR/cc_periods" 
 
-python3 analysis/plot_results.py "$RUN_DIR" 
+python3 helpers/plot_results.py "$RUN_DIR" 
 
 
 rm -f "clock.log"

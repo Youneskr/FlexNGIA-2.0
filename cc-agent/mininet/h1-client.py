@@ -1,3 +1,7 @@
+# This script is designed to run on h1 in a Mininet topology. 
+# It connects to h2 and sends continuous traffic for a specified duration while enabling kernel monitoring via TCP option 150.
+# 
+
 import socket
 import struct
 import time
@@ -6,7 +10,7 @@ import sys
 # Configuration matches your Mininet topology
 TARGET_IP = "10.0.0.2"  # IP of h2
 TARGET_PORT = 5000
-TCP_MONITOR_OPTION = 150
+TCP_MONITOR_OPTION = 150  
 CHUNK_SIZE = 1024 * 32  # 32KB chunks
 TEST_DURATION = 200     # Duration in seconds
 
@@ -22,7 +26,7 @@ def start_flood():
         # Pack '1' as a 4-byte integer to enable Option 150
         val = struct.pack("i", 1)
         sock.setsockopt(socket.IPPROTO_TCP, TCP_MONITOR_OPTION, val)
-        print(f"[*] Setsockopt {TCP_MONITOR_OPTION} enabled. Kernel is tracing.")
+        print(f"[*] Setsockopt {TCP_MONITOR_OPTION} enabled. Kernel is being monitored.")
 
         # --- DATA FLOOD (TIME BASED) ---
         print(f"[*] Sending continuous traffic for {TEST_DURATION} seconds...")
