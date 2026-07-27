@@ -27,7 +27,7 @@ from utilities import (
     switch_congestion_control,
 )
 
-load_dotenv("config.llm.env")
+load_dotenv("config.env")
 EvaluationInterval=int(os.getenv("EVALUATION_INTERVAL"))
 LLM_ATTEMPTS=int(os.getenv("LLM_ATTEMPTS"))
 LLM_Activated=int(os.getenv("LLM_ACTIVATED"))
